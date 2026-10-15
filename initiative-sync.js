@@ -47,6 +47,7 @@
   let initiativeState = createDefaultGmState();
   let publicState = createDefaultPublicState();
   let draggedEntryId = "";
+  let draggedTokenEntryId = "";
   let activeHpEntryId = "";
   let activePanelInteraction = null;
   let gmHintResetTimer = 0;
@@ -756,6 +757,8 @@
     gmUi.list.addEventListener("dragleave", handleGmDragLeave);
     gmUi.list.addEventListener("drop", handleGmDrop);
     gmUi.list.addEventListener("dragend", clearDragState);
+    viewport.addEventListener("dragover", handleTokenDragOver);
+    viewport.addEventListener("drop", handleTokenDrop);
 
     gmUi.damageInputs.forEach((input) => {
       input.addEventListener("input", () => {
@@ -850,6 +853,12 @@
   function handleGmListClick(event) {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+
+    const tokenButton = target.closest("[data-create-token]");
+    if (tokenButton instanceof HTMLElement) {
+      createEntryToken(tokenButton.dataset.id || "");
+      return;
+    }
 
     const hpButton = target.closest("[data-hp-action]");
     if (hpButton instanceof HTMLElement) {
@@ -976,6 +985,18 @@
     const entryElement = target.closest(".initiative-entry");
     if (!(entryElement instanceof HTMLElement)) return;
 
+    if (target.closest("[data-create-token]")) {
+      clearDragState();
+      draggedTokenEntryId = entryElement.dataset.id || "";
+      if (!draggedTokenEntryId) return;
+      target.classList.add("dragging-token");
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.setData("application/x-mapfog-initiative-token", draggedTokenEntryId);
+      }
+      return;
+    }
+
     draggedEntryId = entryElement.dataset.id || "";
     if (!draggedEntryId) return;
 
@@ -994,7 +1015,7 @@
     if (!(entryElement instanceof HTMLElement) || entryElement.dataset.id === draggedEntryId) return;
 
     event.preventDefault();
-    clearDragState();
+    clearDragHighlights();
     entryElement.classList.add("drag-over");
   }
 
@@ -1017,11 +1038,42 @@
     draggedEntryId = "";
   }
 
-  function clearDragState() {
-    ui.list?.querySelectorAll(".dragging, .drag-over").forEach((entry) => {
-      entry.classList.remove("dragging", "drag-over");
+  function isTokenDropTarget(target) {
+    return target instanceof Element
+      && (target === viewport || Boolean(target.closest("#canvasHolder, #emptyState")));
+  }
+
+  function handleTokenDragOver(event) {
+    if (!draggedTokenEntryId || !isTokenDropTarget(event.target)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleTokenDrop(event) {
+    if (!draggedTokenEntryId || !isTokenDropTarget(event.target)) return;
+    event.preventDefault();
+    const entryId = draggedTokenEntryId;
+    clearDragState();
+    createEntryToken(entryId, { clientX: event.clientX, clientY: event.clientY });
+  }
+
+  function createEntryToken(entryId, clientPoint = null) {
+    const entry = getEntryById(entryId);
+    if (!entry) return;
+    const result = window.MapFogTokens?.createFromInitiative(entry, clientPoint);
+    showGmHint(result?.error || (result?.token ? `已建立 ${entry.name} token。` : "目前無法建立 token。"), 2200);
+  }
+
+  function clearDragHighlights() {
+    ui.list?.querySelectorAll(".dragging, .drag-over, .dragging-token").forEach((entry) => {
+      entry.classList.remove("dragging", "drag-over", "dragging-token");
     });
+  }
+
+  function clearDragState() {
+    clearDragHighlights();
     draggedEntryId = "";
+    draggedTokenEntryId = "";
   }
 
   function removeEntryById(entryId, options = {}) {
@@ -1169,10 +1221,15 @@
     order.textContent = `#${index + 1}`;
     order.title = "拖曳排序；列取得焦點後可用方向鍵上下移動";
 
-    const name = document.createElement("div");
-    name.className = "initiative-name";
+    const name = document.createElement("button");
+    name.type = "button";
+    name.className = "initiative-name initiative-token-name";
+    name.dataset.id = entry.id;
+    name.dataset.createToken = "true";
+    name.draggable = true;
     name.textContent = entry.name;
-    name.title = entry.name;
+    name.title = `${entry.name}：拖曳到地圖建立 token；點擊放在地圖中央`;
+    name.setAttribute("aria-label", `建立 ${entry.name} token（點擊放在地圖中央，或拖曳到地圖）`);
 
     const initiativeField = document.createElement("label");
     initiativeField.className = "initiative-stat-field";
@@ -1637,6 +1694,29 @@
         line-height: 1.25;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .initiative-token-name {
+        padding: 3px 4px;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        background: transparent;
+        font-family: inherit;
+        text-align: left;
+        cursor: grab;
+      }
+      .initiative-token-name:hover,
+      .initiative-token-name:focus-visible {
+        border-color: rgba(248, 250, 252, 0.65);
+        background: rgba(248, 250, 252, 0.1);
+      }
+      .initiative-token-name:focus-visible {
+        outline: 2px solid #38bdf8;
+        outline-offset: 1px;
+      }
+      .initiative-token-name:active,
+      .initiative-token-name.dragging-token {
+        cursor: grabbing;
+        opacity: 0.65;
       }
       .initiative-remove-button {
         width: 24px;

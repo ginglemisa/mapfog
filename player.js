@@ -299,7 +299,7 @@ function createTokenId() {
 
 function createDefaultTokenState(overrides = {}) {
   return {
-    id: overrides.id || createTokenId(), imageDataUrl: "",
+    id: overrides.id || createTokenId(), name: "", imageDataUrl: "",
     x: mapCanvas.width ? mapCanvas.width / 2 : 0,
     y: mapCanvas.height ? mapCanvas.height / 2 : 0,
     size: TOKEN_DEFAULT_SIZE, shape: "square", visible: false, ...overrides
@@ -310,6 +310,7 @@ function normalizeTokenState(state = {}) {
   const imageDataUrl = typeof state.imageDataUrl === "string" ? state.imageDataUrl : "";
   return {
     id: typeof state.id === "string" && state.id ? state.id : createTokenId(),
+    name: typeof state.name === "string" ? state.name.trim() : "",
     imageDataUrl,
     x: Number.isFinite(Number(state.x)) ? Number(state.x) : (mapCanvas.width ? mapCanvas.width / 2 : 0),
     y: Number.isFinite(Number(state.y)) ? Number(state.y) : (mapCanvas.height ? mapCanvas.height / 2 : 0),
@@ -366,7 +367,7 @@ function preserveProtectedTokenState(nextState) {
   const localToken = tokenCollectionState.tokens.find((token) => token.id === tokenId);
   if (!localToken) return nextState;
 
-  const incoming = normalizeTokenCollectionState(nextState);
+  const incoming = mergeTokenCollectionState(nextState);
   let found = false;
   const tokens = incoming.tokens.map((token) => {
     if (token.id !== tokenId) return token;
@@ -471,7 +472,7 @@ function updateTokenControls() {
     tokenSelect.replaceChildren();
     tokenCollectionState.tokens.forEach((token, index) => {
       const option = document.createElement("option");
-      option.value = token.id; option.textContent = `Token ${index + 1}`; tokenSelect.append(option);
+      option.value = token.id; option.textContent = token.name || `Token ${index + 1}`; tokenSelect.append(option);
     });
     tokenSelect.disabled = !selected;
     if (selected) tokenSelect.value = selected.id;
@@ -515,7 +516,8 @@ function renderTokens() {
     }
     const image = element.querySelector("img"); if (image && image.src !== token.imageDataUrl) image.src = token.imageDataUrl;
     element.style.width = `${token.size}px`; element.style.height = `${token.size}px`;
-    element.style.transform = `translate(${token.x - token.size / 2}px, ${token.y - token.size / 2}px)`;
+    element.style.transform = `translate(${token.x - token.size / 2}px, ${token.y - token.size / 2}px) rotate(var(--token-rotation, 0deg))`;
+    element.title = token.name;
     element.classList.toggle("square", token.shape === "square"); element.classList.toggle("hex", token.shape === "hex");
     element.classList.toggle("selected", token.id === tokenCollectionState.selectedTokenId);
   }
@@ -738,6 +740,8 @@ function applyTransform() {
   }
 
   canvasHolder.style.transform = transform;
+  // Counter-rotate around each token's center while its position follows the map.
+  canvasHolder.style.setProperty("--token-rotation", `${-viewRotation}deg`);
   scheduleViewStatePersist();
 }
 
@@ -1235,6 +1239,7 @@ toolbarToggleBtn?.addEventListener("click", () => {
   const collapsed = floatingToolbar?.classList.contains("collapsed");
   toolbarToggleBtn.title = collapsed ? "展開工具列" : "收合工具列";
   toolbarToggleBtn.setAttribute("aria-label", collapsed ? "展開工具列" : "收合工具列");
+  toolbarToggleBtn.setAttribute("aria-expanded", String(!collapsed));
 });
 
 tokenSettingsBtn?.addEventListener("click", () => {
@@ -1294,7 +1299,7 @@ for (const surface of [toolbarToggleBtn, floatingToolbar, tokenPanel]) {
 }
 
 viewport.addEventListener("pointerdown", (event) => {
-  if (draggingTokenId || event.target.closest?.("button,input,.floating-toolbar,.token-panel,.toolbar-toggle-corner")) return;
+  if (draggingTokenId || event.target.closest?.("button,input,.floating-toolbar,.token-panel")) return;
   if (event.button === 2) {
     event.preventDefault();
     beginPan(event.clientX, event.clientY, event.pointerId);

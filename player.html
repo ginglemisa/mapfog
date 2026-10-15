@@ -112,15 +112,6 @@
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
     }
-    .floating-toolbar.collapsed {
-      display: none;
-    }
-    .toolbar-toggle-corner {
-      position: fixed;
-      top: 14px;
-      left: 14px;
-      z-index: 21;
-    }
     .tool-button {
       width: 48px;
       height: 48px;
@@ -157,16 +148,6 @@
       stroke-linecap: round;
       stroke-linejoin: round;
       pointer-events: none;
-    }
-    .tool-button.toolbar-toggle-corner {
-      width: 24px;
-      height: 24px;
-      min-width: 24px;
-      border-radius: 7px;
-    }
-    .tool-button.toolbar-toggle-corner svg {
-      width: 12px;
-      height: 12px;
     }
     .token-panel {
       position: fixed;
@@ -285,23 +266,10 @@
         right: 10px;
         padding: 6px;
       }
-      .toolbar-toggle-corner {
-        top: 10px;
-        left: 10px;
-      }
       .tool-button {
         width: 44px;
         height: 44px;
         min-width: 44px;
-      }
-      .tool-button.toolbar-toggle-corner {
-        width: 22px;
-        height: 22px;
-        min-width: 22px;
-      }
-      .tool-button.toolbar-toggle-corner svg {
-        width: 11px;
-        height: 11px;
       }
       .token-panel {
         top: 68px;
@@ -310,14 +278,14 @@
       }
     }
   </style>
+  <link rel="stylesheet" href="toolbar-ui.css">
 </head>
 <body>
   <div id="viewport" class="viewport">
-    <button id="toolbarToggleBtn" class="tool-button toolbar-toggle-corner" type="button" title="收合工具列" aria-label="收合工具列">
-      <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
-    </button>
-
     <div id="floatingToolbar" class="floating-toolbar" aria-label="玩家工具列">
+      <button id="toolbarToggleBtn" class="tool-button toolbar-toggle" type="button" title="收合工具列" aria-label="收合工具列" aria-expanded="true" aria-controls="floatingToolbar">
+        <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
       <button id="rotateBtn" class="tool-button" type="button" title="圖片右轉 90°" aria-label="圖片右轉 90 度">
         <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg>
       </button>

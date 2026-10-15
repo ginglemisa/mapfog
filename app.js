@@ -620,7 +620,7 @@ function createTokenId() {
 
 function createDefaultTokenState(overrides = {}) {
   return {
-    id: overrides.id || createTokenId(), imageDataUrl: "",
+    id: overrides.id || createTokenId(), name: "", imageDataUrl: "",
     x: mapCanvas.width ? mapCanvas.width / 2 : 0,
     y: mapCanvas.height ? mapCanvas.height / 2 : 0,
     size: TOKEN_DEFAULT_SIZE, shape: "square", visible: false, ...overrides
@@ -631,6 +631,7 @@ function normalizeTokenState(state = {}) {
   const imageDataUrl = typeof state.imageDataUrl === "string" ? state.imageDataUrl : "";
   return {
     id: typeof state.id === "string" && state.id ? state.id : createTokenId(),
+    name: typeof state.name === "string" ? state.name.trim() : "",
     imageDataUrl,
     x: Number.isFinite(Number(state.x)) ? Number(state.x) : (mapCanvas.width ? mapCanvas.width / 2 : 0),
     y: Number.isFinite(Number(state.y)) ? Number(state.y) : (mapCanvas.height ? mapCanvas.height / 2 : 0),
@@ -687,7 +688,7 @@ function preserveProtectedTokenState(nextState) {
   const localToken = tokenCollectionState.tokens.find((token) => token.id === tokenId);
   if (!localToken) return nextState;
 
-  const incoming = normalizeTokenCollectionState(nextState);
+  const incoming = mergeTokenCollectionState(nextState);
   let found = false;
   const tokens = incoming.tokens.map((token) => {
     if (token.id !== tokenId) return token;
@@ -792,7 +793,7 @@ function updateTokenControls() {
     tokenSelect.replaceChildren();
     tokenCollectionState.tokens.forEach((token, index) => {
       const option = document.createElement("option");
-      option.value = token.id; option.textContent = `Token ${index + 1}`; tokenSelect.append(option);
+      option.value = token.id; option.textContent = token.name || `Token ${index + 1}`; tokenSelect.append(option);
     });
     tokenSelect.disabled = !selected;
     if (selected) tokenSelect.value = selected.id;
@@ -828,7 +829,8 @@ function renderTokens() {
     }
     const image = element.querySelector("img"); if (image && image.src !== token.imageDataUrl) image.src = token.imageDataUrl;
     element.style.width = `${token.size}px`; element.style.height = `${token.size}px`;
-    element.style.transform = `translate(${token.x - token.size / 2}px, ${token.y - token.size / 2}px)`;
+    element.style.transform = `translate(${token.x - token.size / 2}px, ${token.y - token.size / 2}px) rotate(var(--token-rotation, 0deg))`;
+    element.title = token.name;
     element.classList.toggle("square", token.shape === "square"); element.classList.toggle("hex", token.shape === "hex");
     element.classList.toggle("selected", token.id === tokenCollectionState.selectedTokenId);
   }
@@ -878,6 +880,43 @@ function createCenteredTokenDataUrl(sourceDataUrl) {
     image.onerror = () => reject(new Error("無法讀取這張圖片")); image.src = sourceDataUrl;
   });
 }
+
+function createInitiativeToken(entry, clientPoint = null) {
+  if (!currentImage) return { error: "請先上傳地圖，再建立 token。" };
+
+  const point = clientPoint ? eventToCanvasPoint(clientPoint) : { x: mapCanvas.width / 2, y: mapCanvas.height / 2 };
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
+    || point.x < 0 || point.y < 0 || point.x > mapCanvas.width || point.y > mapCanvas.height) {
+    return { error: "請將名稱拖曳到地圖範圍內。" };
+  }
+
+  const name = String(entry.name || "").trim();
+  const initial = name.match(/[A-Za-z\p{Script=Han}]/u)?.[0] || Array.from(name)[0] || "?";
+  const canvas = document.createElement("canvas");
+  canvas.width = TOKEN_CROP_SIZE;
+  canvas.height = TOKEN_CROP_SIZE;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = entry.side === "enemy" ? "#b91c1c" : "#15803d";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `700 ${TOKEN_CROP_SIZE * 0.64}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  ctx.textAlign = "center";
+  const metrics = ctx.measureText(initial);
+  const textY = (TOKEN_CROP_SIZE + metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
+  ctx.fillText(initial, TOKEN_CROP_SIZE / 2, textY, TOKEN_CROP_SIZE * 0.84);
+
+  const token = normalizeTokenState({
+    name,
+    imageDataUrl: canvas.toDataURL("image/png"),
+    visible: true,
+    x: roundCanvasValue(point.x),
+    y: roundCanvasValue(point.y)
+  });
+  setTokenCollectionState({ tokens: [...tokenCollectionState.tokens, token], selectedTokenId: token.id }, { includeImage: true, changedTokenId: token.id });
+  return { token };
+}
+
+window.MapFogTokens = { createFromInitiative: createInitiativeToken };
 
 function loadTokenFromFile(file) {
   if (!file) return;
@@ -1167,6 +1206,8 @@ function applyTransform() {
   }
 
   canvasHolder.style.transform = transform;
+  // Counter-rotate around each token's center while its position follows the map.
+  canvasHolder.style.setProperty("--token-rotation", `${-viewRotation}deg`);
   zoomValue.textContent = `${Math.round(scale * 100)}%`;
   zoomRange.value = Math.round(scale * 100);
   scheduleViewStatePersist();
@@ -2048,6 +2089,7 @@ toolbarToggleBtn?.addEventListener("click", () => {
   const collapsed = floatingToolbar?.classList.contains("collapsed");
   toolbarToggleBtn.title = collapsed ? "展開工具列" : "收合工具列";
   toolbarToggleBtn.setAttribute("aria-label", collapsed ? "展開工具列" : "收合工具列");
+  toolbarToggleBtn.setAttribute("aria-expanded", String(!collapsed));
 });
 
 // Keep the native grid/token button and ARIA state in sync with tablet drawers.

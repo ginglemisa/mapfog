@@ -95,13 +95,14 @@
       max-height: min(160px, calc(100svh - 24px));
     }
     .controls-panel.collapsed .field-upload,
+    .controls-panel.collapsed .zoom-field,
     .controls-panel.collapsed .footer-note,
     .controls-panel.collapsed .cache-actions,
     .controls-panel.collapsed .mode-note {
       display: none;
     }
     .controls-panel.collapsed .toolbar {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: minmax(0, 1fr);
       gap: 10px 18px;
       align-items: center;
     }
@@ -345,15 +346,6 @@
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
     }
-    .toolbar-toggle-corner {
-      position: absolute;
-      top: 12px;
-      left: 12px;
-      z-index: 31;
-    }
-    .floating-toolbar.collapsed {
-      display: none;
-    }
     .tool-button {
       width: 48px;
       height: 48px;
@@ -376,16 +368,6 @@
       stroke-linecap: round;
       stroke-linejoin: round;
       pointer-events: none;
-    }
-    .tool-button.toolbar-toggle-corner {
-      width: 24px;
-      height: 24px;
-      min-width: 24px;
-      border-radius: 7px;
-    }
-    .tool-button.toolbar-toggle-corner svg {
-      width: 12px;
-      height: 12px;
     }
     .tool-button.active {
       border-color: var(--accent);
@@ -662,15 +644,6 @@
         height: 44px;
         min-width: 44px;
       }
-      .tool-button.toolbar-toggle-corner {
-        width: 22px;
-        height: 22px;
-        min-width: 22px;
-      }
-      .tool-button.toolbar-toggle-corner svg {
-        width: 11px;
-        height: 11px;
-      }
       .grid-panel,
       .token-panel {
         top: 64px;
@@ -685,6 +658,7 @@
     }
 
   </style>
+  <link rel="stylesheet" href="toolbar-ui.css">
   <link rel="stylesheet" href="tablet-ui.css">
 </head>
 <body class="gm-page">
@@ -706,7 +680,7 @@
           <input id="brushSize" type="range" min="10" max="400" step="1" value="100">
         </div>
 
-        <div class="field slider-field">
+        <div class="field slider-field zoom-field">
           <label for="zoomRange">縮放：<span class="value" id="zoomValue">100%</span></label>
           <input id="zoomRange" type="range" min="10" max="500" step="5" value="100">
         </div>
@@ -726,11 +700,10 @@
     <div class="panel stage">
       <div id="viewport" class="viewport">
 
-        <button id="toolbarToggleBtn" class="tool-button collapse-toggle toolbar-toggle-corner" type="button" title="收合工具列" aria-label="收合工具列">
-          <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
-        </button>
-
         <div id="floatingToolbar" class="floating-toolbar" aria-label="地圖工具列">
+          <button id="toolbarToggleBtn" class="tool-button toolbar-toggle" type="button" title="收合工具列" aria-label="收合工具列" aria-expanded="true" aria-controls="floatingToolbar">
+            <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
           <button id="toggleFogBtn" class="tool-button" type="button" title="切換擦霧／補霧" aria-label="切換擦霧或補霧">
             <svg viewBox="0 0 24 24"><path d="M3 15c3-5 6-7 9-7s6 2 9 7"/><path d="M5 18h14"/><path d="M12 8V4"/></svg>
           </button>

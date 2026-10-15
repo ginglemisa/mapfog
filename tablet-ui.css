@@ -19,15 +19,14 @@
   flex: 0 0 44px;
   border-radius: 10px;
 }
-.gm-page.tablet-layout .toolbar-toggle-corner {
+.gm-page.tablet-layout .floating-toolbar.collapsed {
   top: max(10px, env(safe-area-inset-top));
   left: max(10px, env(safe-area-inset-left));
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
-  border-radius: 10px;
+  max-width: none;
+  gap: 0;
+  padding: 0;
+  overflow: visible;
 }
-.gm-page.tablet-layout .toolbar-toggle-corner svg { width: 18px; height: 18px; }
 
 /* Map settings are closed by default and become a fixed, scrollable drawer. */
 .gm-page.tablet-layout .controls-panel,
@@ -56,7 +55,8 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
-.gm-page.tablet-layout .controls-panel.collapsed .field-upload { display: flex; }
+.gm-page.tablet-layout .controls-panel.collapsed .field-upload,
+.gm-page.tablet-layout .controls-panel.collapsed .zoom-field { display: flex; }
 .gm-page.tablet-layout .controls-panel.collapsed .footer-note,
 .gm-page.tablet-layout .controls-panel.collapsed .mode-note { display: block; }
 .gm-page.tablet-layout .controls-panel.collapsed .cache-actions { display: flex; }

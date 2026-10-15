@@ -1,0 +1,35 @@
+/* Shared GM/player toolbar: the first button stays available when collapsed. */
+.floating-toolbar {
+  max-width: calc(100vw - 24px);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.floating-toolbar > .tool-button {
+  flex: 0 0 auto;
+}
+
+.floating-toolbar.collapsed {
+  top: max(12px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+  right: auto;
+  transform: none;
+  width: max-content;
+  max-width: none;
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  overflow: visible;
+}
+
+.floating-toolbar.collapsed > :not(.toolbar-toggle) {
+  display: none;
+}
+
+.floating-toolbar.collapsed .toolbar-toggle svg {
+  transform: rotate(180deg);
+}
