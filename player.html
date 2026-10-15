@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>玩家戰爭迷霧</title>
+  <style>
+    :root {
+      --line: #334155;
+      --accent: #38bdf8;
+      --muted: #cbd5e1;
+      --panel: #0b1220;
+    }
+    * { box-sizing: border-box; }
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #020617;
+    }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .viewport {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      background: #020617;
+      cursor: grab;
+      touch-action: none;
+    }
+    .viewport.panning {
+      cursor: grabbing;
+    }
+    .canvas-holder {
+      position: absolute;
+      left: 0;
+      top: 0;
+      transform-origin: top left;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+    canvas {
+      display: block;
+      max-width: none;
+      image-rendering: auto;
+      touch-action: none;
+    }
+    #gridCanvas,
+    #fogCanvas {
+      position: absolute;
+      inset: 0;
+    }
+    #gridCanvas {
+      pointer-events: none;
+    }
+    .token-layer {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+    }
+    .map-token {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 96px;
+      height: 96px;
+      overflow: hidden;
+      border: 2px solid rgba(248, 250, 252, 0.9);
+      background: rgba(15, 23, 42, 0.68);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.42);
+      cursor: grab;
+      pointer-events: auto;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .map-token.square {
+      border-radius: 8px;
+    }
+    .map-token.hex {
+      clip-path: polygon(25% 4%, 75% 4%, 100% 50%, 75% 96%, 25% 96%, 0 50%);
+    }
+    .map-token.dragging {
+      cursor: grabbing;
+    }
+    .map-token img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+      pointer-events: none;
+    }
+    .floating-toolbar {
+      position: fixed;
+      top: 14px;
+      right: 14px;
+      z-index: 20;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 8px;
+      border: 1px solid rgba(148, 163, 184, 0.36);
+      border-radius: 14px;
+      background: rgba(2, 6, 23, 0.76);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    .floating-toolbar.collapsed {
+      display: none;
+    }
+    .toolbar-toggle-corner {
+      position: fixed;
+      top: 14px;
+      left: 14px;
+      z-index: 21;
+    }
+    .tool-button {
+      width: 48px;
+      height: 48px;
+      min-width: 48px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: 1px solid rgba(148, 163, 184, 0.36);
+      border-radius: 8px;
+      background: rgba(2, 6, 23, 0.76);
+      color: #f8fafc;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    .tool-button:hover {
+      border-color: #38bdf8;
+      background: rgba(15, 23, 42, 0.88);
+    }
+    .tool-button.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.22) inset;
+    }
+    .tool-button.danger:hover {
+      border-color: #ef4444;
+    }
+    .tool-button svg {
+      width: 22px;
+      height: 22px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      pointer-events: none;
+    }
+    .tool-button.toolbar-toggle-corner {
+      width: 24px;
+      height: 24px;
+      min-width: 24px;
+      border-radius: 7px;
+    }
+    .tool-button.toolbar-toggle-corner svg {
+      width: 12px;
+      height: 12px;
+    }
+    .token-panel {
+      position: fixed;
+      top: 78px;
+      right: 14px;
+      z-index: 24;
+      width: min(336px, calc(100vw - 28px));
+      display: grid;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.32);
+      border-radius: 8px;
+      background: rgba(11, 18, 32, 0.92);
+      box-shadow: 0 16px 34px rgba(0, 0, 0, 0.38);
+      color: #f8fafc;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    .token-panel[hidden] {
+      display: none;
+    }
+    .token-panel-header,
+    .token-control-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .token-panel-title {
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+    .token-close-button {
+      width: 28px;
+      height: 28px;
+      min-width: 28px;
+      padding: 0;
+      border-radius: 8px;
+    }
+    .token-panel label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .token-select { width: 100%; min-height: 38px; border-radius: 8px; padding: 6px 8px; background: #182033; color: #fff; border: 1px solid rgba(255,255,255,.25); }
+
+    .token-upload-button,
+    .token-clear-button {
+      width: 100%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px solid rgba(148, 163, 184, 0.36);
+      border-radius: 8px;
+      background: rgba(2, 6, 23, 0.7);
+      color: #f8fafc;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .token-upload-button:hover,
+    .token-clear-button:hover {
+      border-color: var(--accent);
+    }
+    .token-clear-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.48;
+    }
+    .segmented {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px;
+      padding: 3px;
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      border-radius: 8px;
+      background: rgba(2, 6, 23, 0.62);
+    }
+    .segmented button {
+      width: auto;
+      padding: 8px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: #f8fafc;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .segmented button.active {
+      border-color: rgba(56, 189, 248, 0.55);
+      background: rgba(56, 189, 248, 0.13);
+    }
+    .token-slider {
+      display: grid;
+      gap: 6px;
+    }
+    .token-slider input[type="range"] {
+      width: 100%;
+    }
+    .token-value,
+    .token-status {
+      color: white;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .token-status {
+      color: var(--muted);
+      font-weight: 600;
+    }
+    @media (max-width: 700px) {
+      .floating-toolbar {
+        top: 10px;
+        right: 10px;
+        padding: 6px;
+      }
+      .toolbar-toggle-corner {
+        top: 10px;
+        left: 10px;
+      }
+      .tool-button {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+      }
+      .tool-button.toolbar-toggle-corner {
+        width: 22px;
+        height: 22px;
+        min-width: 22px;
+      }
+      .tool-button.toolbar-toggle-corner svg {
+        width: 11px;
+        height: 11px;
+      }
+      .token-panel {
+        top: 68px;
+        right: 8px;
+        width: min(320px, calc(100vw - 16px));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport" class="viewport">
+    <button id="toolbarToggleBtn" class="tool-button toolbar-toggle-corner" type="button" title="收合工具列" aria-label="收合工具列">
+      <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+
+    <div id="floatingToolbar" class="floating-toolbar" aria-label="玩家工具列">
+      <button id="rotateBtn" class="tool-button" type="button" title="圖片右轉 90°" aria-label="圖片右轉 90 度">
+        <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg>
+      </button>
+
+      <button id="tokenSettingsBtn" class="tool-button" type="button" title="Token 設定" aria-label="Token 設定" aria-controls="tokenPanel" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><path d="M12 3l7 4v10l-7 4-7-4V7z"/><path d="M12 7l3.5 2v6L12 17l-3.5-2V9z"/></svg>
+      </button>
+    </div>
+
+    <div id="tokenPanel" class="token-panel" role="region" aria-label="Token 設定" hidden>
+      <div class="token-panel-header">
+        <span class="token-panel-title">Token 設定</span>
+        <button id="tokenPanelCloseBtn" class="tool-button token-close-button" type="button" title="收起 Token 設定" aria-label="收起 Token 設定">
+          <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      </div>
+
+      <button id="tokenUploadBtn" class="token-upload-button" type="button">上傳 token 圖片</button>
+          <label for="tokenSelect">目前選取</label>
+          <select id="tokenSelect" class="token-select" disabled></select>
+      <input id="tokenFileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+
+      <div class="token-slider">
+        <div class="token-control-line">
+          <label for="tokenSize">大小</label>
+          <span id="tokenSizeValue" class="token-value">96px</span>
+        </div>
+        <input id="tokenSize" type="range" min="16" max="800" step="1" value="96">
+      </div>
+
+      <div class="segmented" aria-label="Token 形狀">
+        <button id="tokenSquareBtn" type="button">方形</button>
+        <button id="tokenHexBtn" type="button">六角形</button>
+      </div>
+
+      <button id="tokenClearBtn" class="token-clear-button danger" type="button">移除 token</button>
+      <div id="tokenStatus" class="token-status">尚未上傳 token</div>
+    </div>
+
+    <div id="canvasHolder" class="canvas-holder" hidden>
+      <canvas id="mapCanvas"></canvas>
+      <canvas id="gridCanvas"></canvas>
+      <canvas id="fogCanvas"></canvas>
+      <div id="tokenLayer" class="token-layer" aria-hidden="true"></div>
+    </div>
+  </div>
+  <script src="https://www.gstatic.com/firebasejs/12.13.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.13.0/firebase-database-compat.js"></script>
+  <script src="firebase-sync.js"></script>
+  <script src="dice.js"></script>
+  <script src="player.js"></script>
+  <script src="initiative-sync.js?v=20260701-panel-drag"></script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MapFog</title>
+  <style>
+    :root {
+      --bg: #080c12;
+      --panel: #111827;
+      --text: #f8fafc;
+      --muted: #9ca3af;
+      --accent: #38bdf8;
+      --line: #253247;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        linear-gradient(135deg, rgba(56, 189, 248, 0.08) 0 1px, transparent 1px 44px),
+        linear-gradient(180deg, #111827 0%, var(--bg) 72%);
+      background-size: 44px 44px, auto;
+      color: var(--text);
+    }
+    main {
+      width: min(560px, calc(100vw - 32px));
+      display: grid;
+      gap: 22px;
+      text-align: center;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(42px, 9vw, 76px);
+      line-height: 0.95;
+      letter-spacing: 0;
+    }
+    nav {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    a {
+      display: flex;
+      min-height: 92px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 24, 39, 0.88);
+      color: var(--text);
+      text-decoration: none;
+      font-size: 22px;
+      font-weight: 700;
+      transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+    }
+    a:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+      background: rgba(15, 23, 42, 0.96);
+    }
+    .quick-help {
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 24, 39, 0.62);
+      text-align: left;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+    .quick-help h2 {
+      margin: 0 0 6px;
+      color: var(--text);
+      font-size: 16px;
+    }
+    .quick-help p { margin: 4px 0; }
+    .quick-help strong { color: var(--text); }
+    .quick-help code {
+      color: #bae6fd;
+      overflow-wrap: anywhere;
+    }
+    @media (max-width: 560px) {
+      nav {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>MapFog</h1>
+    <nav aria-label="入口">
+      <a href="gm.html">GM 控制台</a>
+      <a href="player.html">玩家畫面</a>
+    </nav>
+    <section class="quick-help" aria-labelledby="quickHelpTitle">
+      <h2 id="quickHelpTitle">第一次使用</h2>
+      <p><strong>GM：</strong>上傳地圖後即可擦除／補回迷霧，也可設定格線、Token、先攻與擲骰。</p>
+      <p><strong>玩家：</strong>開啟玩家畫面即可查看同步內容，並可移動 Token、擲骰。</p>
+      <p><strong>跨裝置：</strong>GM 與玩家網址加上相同的 <code>?room=房間名</code>。房間名限 <strong>8–10 個字元</strong>，只能使用英文字母、數字與連字號 <code>-</code>。例如 <code>gm.html?room=mygame01</code> 與 <code>player.html?room=mygame01</code>。</p>
+    </section>
+  </main>
+</body>
+</html>
