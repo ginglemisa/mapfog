@@ -810,6 +810,11 @@
           <label for="tokenSelect">目前選取</label>
           <select id="tokenSelect" class="token-select" disabled></select>
           <input id="tokenFileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+          <button id="tokenLockBtn" class="token-upload-button" type="button" disabled>🔓 未鎖定（點此鎖定）</button>
+          <div class="segmented" aria-label="全部 token 鎖定">
+            <button id="tokenLockAllBtn" type="button" disabled>全部鎖定</button>
+            <button id="tokenUnlockAllBtn" type="button" disabled>全部解鎖</button>
+          </div>
 
           <div class="token-slider">
             <div class="token-control-line">

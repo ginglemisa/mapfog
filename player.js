@@ -45,7 +45,7 @@ const VIEW_STATE_PERSIST_DELAY_MS = 300;
 const LOCAL_TOKEN_PROTECTION_MS = 2000;
 const TOKEN_SOURCE_ROLE = "player";
 // 圖片與 id 只在新增時送出，其餘欄位可以單獨更新。
-const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order"];
+const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order", "locked"];
 const TOKEN_GEOMETRY_KEYS = ["x", "y", "size", "shape"];
 const queryParams = new URLSearchParams(window.location.search);
 const FIREBASE_ROOM_ID = queryParams.get("room") || "";
@@ -348,7 +348,8 @@ function normalizeTokenState(state = {}) {
     shape: state.shape === "hex" ? "hex" : "square",
     visible: Boolean(state.visible && imageDataUrl),
     // 建立時間，用來決定 token 清單與疊放順序；各自存在 token 上，同時新增也不會互相蓋掉。
-    order: Number.isFinite(Number(state.order)) ? Number(state.order) : 0
+    order: Number.isFinite(Number(state.order)) ? Number(state.order) : 0,
+    locked: Boolean(state.locked)
   };
 }
 
@@ -469,13 +470,15 @@ function sendTokenRemove(tokenId) {
   firebaseSync?.removeToken(tokenId).catch(logFirebaseError);
 }
 
-function flushTokenDragSync(tokenId = draggingTokenId) {
+function flushTokenDragSync(tokenId = draggingTokenId, isFinalPosition = false) {
   if (tokenDragSyncTimer !== null) {
     window.clearTimeout(tokenDragSyncTimer);
     tokenDragSyncTimer = null;
   }
 
   if (!tokenId) return;
+  // 拖到一半被 GM 鎖定：中途位置不再送出，只在放開時送最後一筆，GM 會在寬限時間內接受。
+  if (getTokenById(tokenId)?.locked && !isFinalPosition) return;
   lastTokenDragSyncAt = Date.now();
   sendTokenPatch(tokenId, ["x", "y"]);
 }
@@ -501,7 +504,7 @@ function flushTokenControlSync(tokenId, keys) {
   }
 
   persistTokenState();
-  if (tokenId) sendTokenPatch(tokenId, keys);
+  if (tokenId && !getTokenById(tokenId)?.locked) sendTokenPatch(tokenId, keys);
 }
 
 function scheduleTokenControlSync(tokenId, keys) {
@@ -528,20 +531,26 @@ function updateTokenControls() {
     tokenSelect.replaceChildren();
     tokenCollectionState.tokens.forEach((token, index) => {
       const option = document.createElement("option");
-      option.value = token.id; option.textContent = token.name || `Token ${index + 1}`; tokenSelect.append(option);
+      option.value = token.id; option.textContent = `${token.locked ? "🔒 " : ""}${token.name || `Token ${index + 1}`}`; tokenSelect.append(option);
     });
     tokenSelect.disabled = !selected;
     if (selected) tokenSelect.value = selected.id;
   }
-  if (tokenSize) { tokenSize.disabled = !selected; tokenSize.value = Math.round(selected?.size ?? TOKEN_DEFAULT_SIZE); }
+  // 鎖定的 token 玩家完全不能操作。
+  const editable = Boolean(selected && !selected.locked);
+  if (tokenSize) { tokenSize.disabled = !editable; tokenSize.value = Math.round(selected?.size ?? TOKEN_DEFAULT_SIZE); }
   if (tokenSizeValue) tokenSizeValue.textContent = `${Math.round(selected?.size ?? TOKEN_DEFAULT_SIZE)}px`;
   tokenSquareBtn?.classList.toggle("active", selected?.shape === "square");
   tokenHexBtn?.classList.toggle("active", selected?.shape === "hex");
-  if (tokenSquareBtn) tokenSquareBtn.disabled = !selected;
-  if (tokenHexBtn) tokenHexBtn.disabled = !selected;
-  if (tokenClearBtn) tokenClearBtn.disabled = !selected;
+  if (tokenSquareBtn) tokenSquareBtn.disabled = !editable;
+  if (tokenHexBtn) tokenHexBtn.disabled = !editable;
+  if (tokenClearBtn) tokenClearBtn.disabled = !editable;
   tokenSettingsBtn?.classList.toggle("active", !tokenPanel?.hidden || tokenCollectionState.tokens.length > 0);
-  if (tokenStatus) tokenStatus.textContent = selected ? `共 ${tokenCollectionState.tokens.length} 個 token；拖曳可同步位置` : "尚未上傳 token";
+  if (tokenStatus) {
+    tokenStatus.textContent = !selected
+      ? "尚未上傳 token"
+      : (selected.locked ? "這個 token 已被 GM 鎖定，無法移動或修改" : `共 ${tokenCollectionState.tokens.length} 個 token；拖曳可同步位置`);
+  }
 }
 
 function safeCssEscape(value) {
@@ -576,6 +585,7 @@ function renderTokens() {
     element.title = token.name;
     element.classList.toggle("square", token.shape === "square"); element.classList.toggle("hex", token.shape === "hex");
     element.classList.toggle("selected", token.id === tokenCollectionState.selectedTokenId);
+    element.classList.toggle("locked", token.locked);
   }
   tokenLayer.querySelectorAll(".map-token").forEach((el) => { if (!visibleIds.has(el.dataset.tokenId)) el.remove(); });
   updateTokenControls();
@@ -589,7 +599,7 @@ function setTokenCollectionState(nextState, options = {}) {
 }
 
 function setTokenState(nextState, options = {}) {
-  const selected = getSelectedToken(); if (!selected) return;
+  const selected = getSelectedToken(); if (!selected || selected.locked) return;
   protectLocalToken(selected.id);
   const updated = normalizeTokenState({ ...selected, ...nextState });
   setTokenCollectionState({ tokens: tokenCollectionState.tokens.map((t) => t.id === selected.id ? updated : t), selectedTokenId: selected.id }, options);
@@ -602,7 +612,7 @@ function selectToken(tokenId) {
 }
 
 function removeSelectedToken() {
-  const selected = getSelectedToken(); if (!selected) return;
+  const selected = getSelectedToken(); if (!selected || selected.locked) return;
   const tokens = tokenCollectionState.tokens.filter((t) => t.id !== selected.id);
   setTokenCollectionState({ tokens, selectedTokenId: tokens[0]?.id || null });
   sendTokenRemove(selected.id);
@@ -672,7 +682,7 @@ function beginTokenDrag(event) {
   if (!element || !hasMap || event.button > 0) return;
 
   const token = tokenCollectionState.tokens.find((t) => t.id === element.dataset.tokenId);
-  if (!token) return;
+  if (!token || token.locked) return;
 
   // 玩家頁面同時支援拖曳地圖。Token 開始拖曳時必須明確取消地圖平移，
   // 並由 token 本身取得 pointer capture，否則部分手機瀏覽器會把後續事件交給 viewport。
@@ -725,7 +735,7 @@ function endTokenDrag(event) {
   protectLocalToken(tokenId);
   persistTokenState();
   // 確保放開時再送出一次最終位置，即使最後一個 pointermove 沒有成功送出。
-  flushTokenDragSync(tokenId);
+  flushTokenDragSync(tokenId, true);
 }
 
 function stopUiPointerEvent(event) {
@@ -1269,12 +1279,14 @@ function addIncomingToken(token) {
   setTokenCollectionState({ tokens: [...tokenCollectionState.tokens, incoming], selectedTokenId: tokenCollectionState.selectedTokenId }, { persist: false });
 }
 
-function patchIncomingToken(tokenId, changes) {
+function patchIncomingToken(tokenId, changes, sourceRole) {
   const existing = getTokenById(tokenId);
   // 已刪除的 token 不接受晚到的變更，避免被救回來。
   if (!existing) return;
   const accepted = pickTokenFields(changes || {}, TOKEN_SYNC_KEYS);
-  if (getProtectedTokenId() === tokenId) {
+  // GM 對鎖定 token 的變更（包含把玩家的修改改回去）一定要套用，不受本機拖曳保護影響。
+  const isGmLockedChange = sourceRole === "gm" && (accepted.locked ?? existing.locked);
+  if (getProtectedTokenId() === tokenId && !isGmLockedChange) {
     for (const key of TOKEN_GEOMETRY_KEYS) delete accepted[key];
   }
   if (!Object.keys(accepted).length) return;
@@ -1296,7 +1308,7 @@ function applyIncomingTokenEvent(event) {
   }
   if (event.kind === "state") applyIncomingTokenState(event.tokenState);
   if (event.kind === "add") addIncomingToken(event.token);
-  if (event.kind === "patch") patchIncomingToken(event.tokenId, event.changes);
+  if (event.kind === "patch") patchIncomingToken(event.tokenId, event.changes, event.sourceRole);
   if (event.kind === "remove") removeIncomingToken(event.tokenId);
 }
 

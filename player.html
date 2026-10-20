@@ -88,6 +88,11 @@
     .map-token.dragging {
       cursor: grabbing;
     }
+    /* GM 鎖定的 token：點擊直接穿透到地圖（可拖曳地圖），游標也不顯示成可拖曳。 */
+    .map-token.locked:not(.dragging) {
+      cursor: default;
+      pointer-events: none;
+    }
     .map-token.selected {
       z-index: 1;
     }

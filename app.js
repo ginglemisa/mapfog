@@ -52,6 +52,9 @@ const tokenHexBtn = document.getElementById("tokenHexBtn");
 const tokenClearBtn = document.getElementById("tokenClearBtn");
 const tokenStatus = document.getElementById("tokenStatus");
 const tokenSelect = document.getElementById("tokenSelect");
+const tokenLockBtn = document.getElementById("tokenLockBtn");
+const tokenLockAllBtn = document.getElementById("tokenLockAllBtn");
+const tokenUnlockAllBtn = document.getElementById("tokenUnlockAllBtn");
 const clearCurrentOlroomBtn = document.getElementById("clearCurrentOlroomBtn");
 const clearAllOlroomsBtn = document.getElementById("clearAllOlroomsBtn");
 const sendPlayersToRoomBtn = document.getElementById("sendPlayersToRoomBtn");
@@ -134,8 +137,12 @@ const VIEW_STATE_PERSIST_DELAY_MS = 300;
 const LOCAL_TOKEN_PROTECTION_MS = 2000;
 const TOKEN_SOURCE_ROLE = "gm";
 // 圖片與 id 只在新增時送出，其餘欄位可以單獨更新。
-const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order"];
+const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order", "locked"];
 const TOKEN_GEOMETRY_KEYS = ["x", "y", "size", "shape"];
+// 玩家只能改未鎖定 token 的位置、大小與形狀；其他欄位一律以 GM 為準。
+const PLAYER_EDITABLE_TOKEN_KEYS = ["x", "y", "size", "shape"];
+// 鎖定後這段時間內，仍接受玩家送來的位置（鎖定前就開始拖、放開才送到的最後一筆）。
+const TOKEN_LOCK_GRACE_MS = 10000;
 const FOG_HISTORY_COMPACT_BATCH_LIMIT = 200;
 const queryParams = new URLSearchParams(window.location.search);
 const FIREBASE_ROOM_ID = queryParams.get("room") || "";
@@ -200,6 +207,10 @@ let suppressBeforeUnloadPersist = false;
 let localRestorePending = true;
 let queuedTokenUpdates = [];
 let remoteMapSaveErrorReported = false;
+// tokenId → GM 在這個畫面按下鎖定的時間，用來判斷玩家的最後一筆拖曳位置是否還在寬限內。
+const tokenLockedAt = new Map();
+// 清除 room 時會收到所有 token 被刪除的通知，這時不能把鎖定的 token 補回去。
+let clearingRoom = false;
 
 function sanitizeStorageSegment(value) {
   return encodeURIComponent(String(value || "default").trim().slice(0, 80) || "default");
@@ -690,7 +701,8 @@ function normalizeTokenState(state = {}) {
     shape: state.shape === "hex" ? "hex" : "square",
     visible: Boolean(state.visible && imageDataUrl),
     // 建立時間，用來決定 token 清單與疊放順序；各自存在 token 上，同時新增也不會互相蓋掉。
-    order: Number.isFinite(Number(state.order)) ? Number(state.order) : 0
+    order: Number.isFinite(Number(state.order)) ? Number(state.order) : 0,
+    locked: Boolean(state.locked)
   };
 }
 
@@ -883,11 +895,19 @@ function updateTokenControls() {
     tokenSelect.replaceChildren();
     tokenCollectionState.tokens.forEach((token, index) => {
       const option = document.createElement("option");
-      option.value = token.id; option.textContent = token.name || `Token ${index + 1}`; tokenSelect.append(option);
+      option.value = token.id; option.textContent = `${token.locked ? "🔒 " : ""}${token.name || `Token ${index + 1}`}`; tokenSelect.append(option);
     });
     tokenSelect.disabled = !selected;
     if (selected) tokenSelect.value = selected.id;
   }
+  if (tokenLockBtn) {
+    tokenLockBtn.disabled = !selected;
+    tokenLockBtn.textContent = selected?.locked ? "🔒 已鎖定（點此解鎖）" : "🔓 未鎖定（點此鎖定）";
+    tokenLockBtn.title = selected?.locked ? "解鎖後，玩家可以移動、縮放、改形狀與刪除這個 token" : "鎖定後，玩家無法操作這個 token";
+  }
+  const lockedCount = tokenCollectionState.tokens.filter((token) => token.locked).length;
+  if (tokenLockAllBtn) tokenLockAllBtn.disabled = lockedCount === tokenCollectionState.tokens.length;
+  if (tokenUnlockAllBtn) tokenUnlockAllBtn.disabled = lockedCount === 0;
   if (tokenSize) { tokenSize.disabled = !selected; tokenSize.value = Math.round(selected?.size ?? TOKEN_DEFAULT_SIZE); }
   if (tokenSizeValue) tokenSizeValue.textContent = `${Math.round(selected?.size ?? TOKEN_DEFAULT_SIZE)}px`;
   const hpFontSize = document.getElementById("tokenHpFontSize");
@@ -960,6 +980,23 @@ function removeSelectedToken() {
   sendTokenRemove(selected.id);
 }
 
+function setTokensLocked(tokenIds, locked) {
+  const targetIds = new Set(tokenIds);
+  const changedIds = tokenCollectionState.tokens
+    .filter((token) => targetIds.has(token.id) && token.locked !== locked)
+    .map((token) => token.id);
+  if (!changedIds.length) return;
+
+  const changedIdSet = new Set(changedIds);
+  for (const tokenId of changedIds) {
+    if (locked) tokenLockedAt.set(tokenId, Date.now());
+    else tokenLockedAt.delete(tokenId);
+  }
+  const tokens = tokenCollectionState.tokens.map((token) => changedIdSet.has(token.id) ? { ...token, locked } : token);
+  setTokenCollectionState({ tokens, selectedTokenId: tokenCollectionState.selectedTokenId });
+  for (const tokenId of changedIds) sendTokenPatch(tokenId, ["locked"]);
+}
+
 function createCenteredTokenDataUrl(sourceDataUrl) {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -1028,7 +1065,8 @@ function createInitiativeToken(entry, clientPoint = null) {
     visible: true,
     x: roundCanvasValue(point.x),
     y: roundCanvasValue(point.y),
-    order: Date.now()
+    order: Date.now(),
+    locked: true
   });
   setTokenCollectionState({ tokens: [...tokenCollectionState.tokens, token], selectedTokenId: token.id });
   sendTokenAdd(getTokenById(token.id));
@@ -1056,7 +1094,7 @@ function loadTokenFromFile(file) {
     try {
       const imageDataUrl = await createCenteredTokenDataUrl(event.target.result);
       const center = clampTokenPosition(mapCanvas.width / 2, mapCanvas.height / 2);
-      const token = normalizeTokenState({ imageDataUrl, visible: true, x: center.x, y: center.y, order: Date.now() });
+      const token = normalizeTokenState({ imageDataUrl, visible: true, x: center.x, y: center.y, order: Date.now(), locked: true });
       setTokenCollectionState({ tokens: [...tokenCollectionState.tokens, token], selectedTokenId: token.id });
       sendTokenAdd(getTokenById(token.id));
     } catch (error) {
@@ -1233,6 +1271,7 @@ async function clearCurrentOlroomCache() {
     }
 
     clearCurrentOlroomBtn.disabled = true;
+    clearingRoom = true;
     try {
       await firebaseSync.clearRoomState();
       removeLocalStorageByPrefix(STORAGE_PREFIX);
@@ -1241,6 +1280,7 @@ async function clearCurrentOlroomCache() {
       window.location.reload();
     } catch (error) {
       console.error("[MapFog Firebase]", error);
+      clearingRoom = false;
       clearCurrentOlroomBtn.disabled = false;
       window.alert("清除 Firebase room 失敗，請確認網路連線後再試一次。");
     }
@@ -2124,11 +2164,24 @@ function addIncomingToken(token) {
   setTokenCollectionState({ tokens: [...tokenCollectionState.tokens, incoming], selectedTokenId: tokenCollectionState.selectedTokenId });
 }
 
-function patchIncomingToken(tokenId, changes) {
+function getPlayerEditableTokenKeys(token) {
+  if (!token.locked) return PLAYER_EDITABLE_TOKEN_KEYS;
+  const lockedAt = tokenLockedAt.get(token.id);
+  return lockedAt && Date.now() - lockedAt < TOKEN_LOCK_GRACE_MS ? ["x", "y"] : [];
+}
+
+function patchIncomingToken(tokenId, changes, sourceRole) {
   const existing = getTokenById(tokenId);
   // 已刪除的 token 不接受晚到的變更，避免被救回來。
   if (!existing) return;
   const accepted = pickTokenFields(changes || {}, TOKEN_SYNC_KEYS);
+  if (sourceRole !== "gm") {
+    const editableKeys = getPlayerEditableTokenKeys(existing);
+    const rejectedKeys = Object.keys(accepted).filter((key) => !editableKeys.includes(key));
+    // GM 是唯一真相：玩家不該改的欄位（例如鎖定的 token）立刻改回 GM 的版本。
+    if (rejectedKeys.length) sendTokenPatch(tokenId, rejectedKeys);
+    for (const key of rejectedKeys) delete accepted[key];
+  }
   if (getProtectedTokenId() === tokenId) {
     for (const key of TOKEN_GEOMETRY_KEYS) delete accepted[key];
   }
@@ -2137,7 +2190,13 @@ function patchIncomingToken(tokenId, changes) {
 }
 
 function removeIncomingToken(tokenId) {
-  if (!getTokenById(tokenId)) return;
+  const existing = getTokenById(tokenId);
+  if (!existing) return;
+  // 鎖定的 token 只有 GM 能刪；GM 自己刪除時本機已先移除，不會走到這裡。
+  if (existing.locked && !clearingRoom) {
+    sendTokenAdd(existing);
+    return;
+  }
   if (draggingTokenId === tokenId) draggingTokenId = null;
   const tokens = tokenCollectionState.tokens.filter((token) => token.id !== tokenId);
   const selectedTokenId = tokenCollectionState.selectedTokenId === tokenId ? (tokens[0]?.id || null) : tokenCollectionState.selectedTokenId;
@@ -2150,7 +2209,7 @@ function applyIncomingTokenEvent(event) {
     return;
   }
   if (event.kind === "add") addIncomingToken(event.token);
-  if (event.kind === "patch") patchIncomingToken(event.tokenId, event.changes);
+  if (event.kind === "patch") patchIncomingToken(event.tokenId, event.changes, event.sourceRole);
   if (event.kind === "remove") removeIncomingToken(event.tokenId);
 }
 
@@ -2393,6 +2452,19 @@ tokenHexBtn?.addEventListener("click", () => {
 
 tokenClearBtn?.addEventListener("click", () => {
   removeSelectedToken();
+});
+
+tokenLockBtn?.addEventListener("click", () => {
+  const selected = getSelectedToken();
+  if (selected) setTokensLocked([selected.id], !selected.locked);
+});
+
+tokenLockAllBtn?.addEventListener("click", () => {
+  setTokensLocked(tokenCollectionState.tokens.map((token) => token.id), true);
+});
+
+tokenUnlockAllBtn?.addEventListener("click", () => {
+  setTokensLocked(tokenCollectionState.tokens.map((token) => token.id), false);
 });
 
 gridEnabled?.addEventListener("change", () => {
