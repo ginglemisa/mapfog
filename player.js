@@ -43,6 +43,10 @@ const CONTROL_SYNC_DEBOUNCE_MS = 300;
 const TOKEN_SYNC_THROTTLE_MS = 300;
 const VIEW_STATE_PERSIST_DELAY_MS = 300;
 const LOCAL_TOKEN_PROTECTION_MS = 2000;
+const TOKEN_SOURCE_ROLE = "player";
+// 圖片與 id 只在新增時送出，其餘欄位可以單獨更新。
+const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order"];
+const TOKEN_GEOMETRY_KEYS = ["x", "y", "size", "shape"];
 const queryParams = new URLSearchParams(window.location.search);
 const FIREBASE_ROOM_ID = queryParams.get("room") || "";
 const FIREBASE_SYNC_MODE = queryParams.get("sync") === "firebase";
@@ -342,7 +346,9 @@ function normalizeTokenState(state = {}) {
     y: Number.isFinite(Number(state.y)) ? Number(state.y) : (mapCanvas.height ? mapCanvas.height / 2 : 0),
     size: clamp(Number(state.size ?? TOKEN_DEFAULT_SIZE), TOKEN_MIN_SIZE, TOKEN_MAX_SIZE),
     shape: state.shape === "hex" ? "hex" : "square",
-    visible: Boolean(state.visible && imageDataUrl)
+    visible: Boolean(state.visible && imageDataUrl),
+    // 建立時間，用來決定 token 清單與疊放順序；各自存在 token 上，同時新增也不會互相蓋掉。
+    order: Number.isFinite(Number(state.order)) ? Number(state.order) : 0
   };
 }
 
@@ -351,7 +357,8 @@ function createDefaultTokenCollectionState() { return { tokens: [], selectedToke
 function normalizeTokenCollectionState(state = {}) {
   if (Array.isArray(state.tokens)) {
     const seen = new Set();
-    const tokens = state.tokens.map(normalizeTokenState).filter((token) => !seen.has(token.id) && seen.add(token.id));
+    const tokens = state.tokens.map(normalizeTokenState).filter((token) => !seen.has(token.id) && seen.add(token.id))
+      .sort((a, b) => a.order - b.order);
     const selectedTokenId = tokens.some((t) => t.id === state.selectedTokenId) ? state.selectedTokenId : (tokens[0]?.id || null);
     return { tokens, selectedTokenId };
   }
@@ -392,14 +399,11 @@ function preserveProtectedTokenState(nextState) {
   if (!localToken) return nextState;
 
   const incoming = mergeTokenCollectionState(nextState);
-  let found = false;
+  // 收到的狀態裡沒有這顆 token，代表已被刪除；不把本機版本補回去，避免救回已刪除的 token。
   const tokens = incoming.tokens.map((token) => {
     if (token.id !== tokenId) return token;
-    found = true;
-    return { ...token, ...localToken, imageDataUrl: localToken.imageDataUrl || token.imageDataUrl };
+    return { ...token, ...pickTokenGeometry(localToken) };
   });
-
-  if (!found) tokens.push(localToken);
 
   return {
     tokens,
@@ -419,19 +423,50 @@ function persistTokenState() {
   writeLocalCache(TOKEN_STATE_STORAGE_KEY, { tokens: tokenCollectionState.tokens });
 }
 
-function getBroadcastTokenState(includeImage = true) {
-  return {
-    tokens: tokenCollectionState.tokens.map((token) => {
-      if (includeImage) return { ...token };
-      const { imageDataUrl, ...lightToken } = token;
-      return lightToken;
-    })
-  };
+function broadcastMessage(message) {
+  syncChannel?.postMessage({ ...message, source: "player" });
 }
 
-function broadcastTokenState(includeImage = true, changedTokenId = null) {
-  syncChannel?.postMessage({ type: "tokenUpdate", source: "player", tokenState: getBroadcastTokenState(includeImage) });
-  firebaseSync?.sendTokenState(getBroadcastTokenState(includeImage), includeImage, changedTokenId);
+function getTokenById(tokenId) {
+  return tokenCollectionState.tokens.find((token) => token.id === tokenId) || null;
+}
+
+function pickTokenFields(source, keys) {
+  const picked = {};
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) picked[key] = source[key];
+  }
+  return picked;
+}
+
+function pickTokenGeometry(token) {
+  return pickTokenFields(token, TOKEN_GEOMETRY_KEYS);
+}
+
+function logFirebaseError(error) {
+  console.error("[MapFog Firebase]", error);
+}
+
+// 以下三個函式是 token 變更唯一的送出口：olroom 走 BroadcastChannel，room 走 Firebase，格式一致。
+function sendTokenAdd(token) {
+  if (!token?.id) return;
+  broadcastMessage({ type: "tokenAdd", token: { ...token }, sourceRole: TOKEN_SOURCE_ROLE });
+  firebaseSync?.addToken(token, TOKEN_SOURCE_ROLE).catch(logFirebaseError);
+}
+
+function sendTokenPatch(tokenId, keys) {
+  const token = getTokenById(tokenId);
+  if (!token) return;
+  const changes = pickTokenFields(token, keys.filter((key) => TOKEN_SYNC_KEYS.includes(key)));
+  if (!Object.keys(changes).length) return;
+  broadcastMessage({ type: "tokenPatch", tokenId, changes, sourceRole: TOKEN_SOURCE_ROLE });
+  firebaseSync?.updateToken(tokenId, changes, TOKEN_SOURCE_ROLE).catch(logFirebaseError);
+}
+
+function sendTokenRemove(tokenId) {
+  if (!tokenId) return;
+  broadcastMessage({ type: "tokenRemove", tokenId, sourceRole: TOKEN_SOURCE_ROLE });
+  firebaseSync?.removeToken(tokenId).catch(logFirebaseError);
 }
 
 function flushTokenDragSync(tokenId = draggingTokenId) {
@@ -442,7 +477,7 @@ function flushTokenDragSync(tokenId = draggingTokenId) {
 
   if (!tokenId) return;
   lastTokenDragSyncAt = Date.now();
-  broadcastTokenState(false, tokenId);
+  sendTokenPatch(tokenId, ["x", "y"]);
 }
 
 function scheduleTokenDragSync(tokenId) {
@@ -459,19 +494,19 @@ function scheduleTokenDragSync(tokenId) {
   }
 }
 
-function flushTokenControlSync(tokenId = getSelectedToken()?.id || null) {
+function flushTokenControlSync(tokenId, keys) {
   if (tokenControlSyncTimer !== null) {
     window.clearTimeout(tokenControlSyncTimer);
     tokenControlSyncTimer = null;
   }
 
   persistTokenState();
-  if (tokenId) broadcastTokenState(false, tokenId);
+  if (tokenId) sendTokenPatch(tokenId, keys);
 }
 
-function scheduleTokenControlSync(tokenId = getSelectedToken()?.id || null) {
+function scheduleTokenControlSync(tokenId, keys) {
   window.clearTimeout(tokenControlSyncTimer);
-  tokenControlSyncTimer = window.setTimeout(() => flushTokenControlSync(tokenId), CONTROL_SYNC_DEBOUNCE_MS);
+  tokenControlSyncTimer = window.setTimeout(() => flushTokenControlSync(tokenId, keys), CONTROL_SYNC_DEBOUNCE_MS);
 }
 
 function clampTokenPosition(x, y) {
@@ -551,14 +586,14 @@ function setTokenCollectionState(nextState, options = {}) {
   if (options.clampPosition !== false) tokenCollectionState.tokens = tokenCollectionState.tokens.map((t) => ({ ...t, ...clampTokenPosition(t.x, t.y) }));
   renderTokens();
   if (options.persist !== false) persistTokenState();
-  if (options.sync !== false) broadcastTokenState(options.includeImage !== false, options.changedTokenId || null);
 }
 
 function setTokenState(nextState, options = {}) {
   const selected = getSelectedToken(); if (!selected) return;
   protectLocalToken(selected.id);
   const updated = normalizeTokenState({ ...selected, ...nextState });
-  setTokenCollectionState({ tokens: tokenCollectionState.tokens.map((t) => t.id === selected.id ? updated : t), selectedTokenId: selected.id }, { ...options, changedTokenId: selected.id });
+  setTokenCollectionState({ tokens: tokenCollectionState.tokens.map((t) => t.id === selected.id ? updated : t), selectedTokenId: selected.id }, options);
+  if (options.sync !== false) sendTokenPatch(selected.id, Object.keys(nextState));
 }
 
 function selectToken(tokenId) {
@@ -569,7 +604,8 @@ function selectToken(tokenId) {
 function removeSelectedToken() {
   const selected = getSelectedToken(); if (!selected) return;
   const tokens = tokenCollectionState.tokens.filter((t) => t.id !== selected.id);
-  setTokenCollectionState({ tokens, selectedTokenId: tokens[0]?.id || null }, { includeImage: true });
+  setTokenCollectionState({ tokens, selectedTokenId: tokens[0]?.id || null });
+  sendTokenRemove(selected.id);
 }
 
 function createCenteredTokenDataUrl(sourceDataUrl) {
@@ -597,8 +633,9 @@ function loadTokenFromFile(file) {
     try {
       const imageDataUrl = await createCenteredTokenDataUrl(event.target.result);
       const center = clampTokenPosition(mapCanvas.width / 2, mapCanvas.height / 2);
-      const token = normalizeTokenState({ imageDataUrl, visible: true, x: center.x, y: center.y });
-      setTokenCollectionState({ tokens: [...tokenCollectionState.tokens, token], selectedTokenId: token.id }, { includeImage: true, changedTokenId: token.id });
+      const token = normalizeTokenState({ imageDataUrl, visible: true, x: center.x, y: center.y, order: Date.now() });
+      setTokenCollectionState({ tokens: [...tokenCollectionState.tokens, token], selectedTokenId: token.id });
+      sendTokenAdd(getTokenById(token.id));
     } catch (error) {
       console.error("[Token upload]", error);
       if (tokenStatus) tokenStatus.textContent = "圖片上傳失敗，請改用 PNG、JPG 或 WebP";
@@ -1160,7 +1197,13 @@ async function readStoredSnapshot() {
 
 syncChannel?.addEventListener("message", (event) => {
   const message = event.data;
-  if (!message || message.source !== "gm") return;
+  if (!message) return;
+
+  // token 的新增、變更、刪除不論來自 GM 或其他玩家畫面都要套用；其餘訊息只聽 GM 的。
+  if (message.type === "tokenAdd") applyIncomingTokenEvent({ kind: "add", token: message.token, sourceRole: message.sourceRole });
+  if (message.type === "tokenPatch") applyIncomingTokenEvent({ kind: "patch", tokenId: message.tokenId, changes: message.changes, sourceRole: message.sourceRole });
+  if (message.type === "tokenRemove") applyIncomingTokenEvent({ kind: "remove", tokenId: message.tokenId, sourceRole: message.sourceRole });
+  if (message.source !== "gm") return;
 
   if (message.type === "snapshot") applySnapshot(message);
   if (message.type === "mapUpdate") applyRemoteMapState(message, { restoreView: !hasMap }).catch((error) => console.error("[MapFog sync]", error));
@@ -1176,7 +1219,7 @@ syncChannel?.addEventListener("message", (event) => {
     cacheCurrentFogState();
   }
   if (message.type === "gridUpdate") setGridSettings(message.gridSettings);
-  if (message.type === "tokenUpdate") applyIncomingTokenState(message.tokenState, { merge: true });
+  if (message.type === "tokenState") applyIncomingTokenEvent({ kind: "state", tokenState: message.tokenState });
   if (message.type === "roomCacheCleared") reloadWithoutPersist();
 });
 
@@ -1203,21 +1246,65 @@ function switchToOfflineRoom(olroom) {
   window.location.href = url.toString();
 }
 
-function applyIncomingTokenState(tokenState, options = {}) {
-  if (localRestorePending) {
-    queuedTokenUpdates.push({ tokenState, merge: Boolean(options.merge) });
+// 收到的狀態不寫回本機暫存：GM 會自己保存，玩家寫回只會讓舊資料蓋掉 GM。
+function applyIncomingTokenState(tokenState) {
+  const nextState = { ...preserveProtectedTokenState(tokenState), selectedTokenId: tokenCollectionState.selectedTokenId };
+  setTokenCollectionState(nextState, { persist: false, merge: true });
+}
+
+function replaceLocalToken(tokenId, nextToken) {
+  const tokens = tokenCollectionState.tokens.map((token) => token.id === tokenId ? nextToken : token);
+  setTokenCollectionState({ tokens, selectedTokenId: tokenCollectionState.selectedTokenId }, { persist: false });
+}
+
+function addIncomingToken(token) {
+  if (!token?.id || !token.imageDataUrl) return;
+  const existing = getTokenById(token.id);
+  const incoming = normalizeTokenState({ ...(existing || {}), ...token });
+  if (existing) {
+    // 正在拖曳或調整的 token 保留本機的位置與外觀。
+    replaceLocalToken(token.id, getProtectedTokenId() === token.id ? { ...incoming, ...pickTokenGeometry(existing) } : incoming);
     return;
   }
-  // 收到的狀態不寫回本機暫存：GM 會自己保存，玩家寫回只會讓舊資料蓋掉 GM。
-  const nextState = { ...preserveProtectedTokenState(tokenState), selectedTokenId: tokenCollectionState.selectedTokenId };
-  setTokenCollectionState(nextState, { sync: false, persist: false, merge: Boolean(options.merge) });
+  setTokenCollectionState({ tokens: [...tokenCollectionState.tokens, incoming], selectedTokenId: tokenCollectionState.selectedTokenId }, { persist: false });
+}
+
+function patchIncomingToken(tokenId, changes) {
+  const existing = getTokenById(tokenId);
+  // 已刪除的 token 不接受晚到的變更，避免被救回來。
+  if (!existing) return;
+  const accepted = pickTokenFields(changes || {}, TOKEN_SYNC_KEYS);
+  if (getProtectedTokenId() === tokenId) {
+    for (const key of TOKEN_GEOMETRY_KEYS) delete accepted[key];
+  }
+  if (!Object.keys(accepted).length) return;
+  replaceLocalToken(tokenId, normalizeTokenState({ ...existing, ...accepted }));
+}
+
+function removeIncomingToken(tokenId) {
+  if (!getTokenById(tokenId)) return;
+  if (draggingTokenId === tokenId) draggingTokenId = null;
+  const tokens = tokenCollectionState.tokens.filter((token) => token.id !== tokenId);
+  const selectedTokenId = tokenCollectionState.selectedTokenId === tokenId ? (tokens[0]?.id || null) : tokenCollectionState.selectedTokenId;
+  setTokenCollectionState({ tokens, selectedTokenId }, { persist: false });
+}
+
+function applyIncomingTokenEvent(event) {
+  if (localRestorePending) {
+    queuedTokenUpdates.push(event);
+    return;
+  }
+  if (event.kind === "state") applyIncomingTokenState(event.tokenState);
+  if (event.kind === "add") addIncomingToken(event.token);
+  if (event.kind === "patch") patchIncomingToken(event.tokenId, event.changes);
+  if (event.kind === "remove") removeIncomingToken(event.tokenId);
 }
 
 function flushQueuedTokenUpdates() {
   localRestorePending = false;
   const updates = queuedTokenUpdates;
   queuedTokenUpdates = [];
-  for (const update of updates) applyIncomingTokenState(update.tokenState, update);
+  for (const update of updates) applyIncomingTokenEvent(update);
 }
 
 // 地圖、迷霧與 token 存在 IndexedDB，不會觸發 storage 事件；只有格線還能走 localStorage 備援。
@@ -1270,8 +1357,10 @@ function attachFirebaseSync(sync) {
     setGridSettings(nextGridSettings);
   });
 
-  sync.onTokenState((nextTokenState) => {
-    applyIncomingTokenState(nextTokenState);
+  sync.onTokenEvents({
+    onAdd: (token, meta) => applyIncomingTokenEvent({ kind: "add", token, ...meta }),
+    onPatch: (tokenId, changes, meta) => applyIncomingTokenEvent({ kind: "patch", tokenId, changes, ...meta }),
+    onRemove: (tokenId) => applyIncomingTokenEvent({ kind: "remove", tokenId })
   });
 }
 
@@ -1308,21 +1397,21 @@ tokenSelect?.addEventListener("change", () => selectToken(tokenSelect.value));
 tokenSize?.addEventListener("input", () => {
   const tokenId = getSelectedToken()?.id || null;
   setTokenState({ size: Number(tokenSize.value) }, { sync: false, persist: false });
-  scheduleTokenControlSync(tokenId);
+  scheduleTokenControlSync(tokenId, ["size"]);
 });
 
 tokenSize?.addEventListener("change", () => {
   const tokenId = getSelectedToken()?.id || null;
   setTokenState({ size: Number(tokenSize.value) }, { sync: false, persist: false });
-  flushTokenControlSync(tokenId);
+  flushTokenControlSync(tokenId, ["size"]);
 });
 
 tokenSquareBtn?.addEventListener("click", () => {
-  setTokenState({ shape: "square" }, { includeImage: false });
+  setTokenState({ shape: "square" });
 });
 
 tokenHexBtn?.addEventListener("click", () => {
-  setTokenState({ shape: "hex" }, { includeImage: false });
+  setTokenState({ shape: "hex" });
 });
 
 tokenClearBtn?.addEventListener("click", () => {

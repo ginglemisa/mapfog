@@ -130,39 +130,63 @@
       return String(tokenId || "").replace(/[.#$/[\]]/g, "-");
     }
 
-    function toFirebaseTokenState(tokenState = {}) {
-      const tokens = Array.isArray(tokenState.tokens) ? tokenState.tokens : [];
-      const tokensById = {};
-      const tokenOrder = [];
+    function tokenRef(tokenId) {
+      return roomPath(`token/tokensById/${tokenKey(tokenId)}`);
+    }
 
-      for (const token of tokens) {
-        if (!token?.id) continue;
-        tokensById[tokenKey(token.id)] = token;
-        tokenOrder.push(token.id);
-      }
-
+    // 每次寫入 token 都記下是誰改的，GM 端靠 sourceRole 判斷要不要接受。
+    function tokenMeta(sourceRole) {
       return {
-        tokenOrder,
-        tokensById
+        sourceRole: sourceRole === "gm" ? "gm" : "player",
+        sourceClientId: clientId,
+        updatedAt: firebase.database.ServerValue.TIMESTAMP
       };
     }
 
-    function fromFirebaseTokenState(value = {}) {
-      if (Array.isArray(value.tokens)) return { tokens: value.tokens };
-      if (!value.tokensById || typeof value.tokensById !== "object") return value;
+    function stripTokenMeta(node = {}) {
+      const { sourceRole, sourceClientId, updatedAt, ...token } = node;
+      return token;
+    }
 
-      // 沒有圖片的節點是「別人剛刪掉、這邊又送了位置更新」留下的殘骸，不能當成 token。
-      const storedTokens = Object.values(value.tokensById).filter((token) => token?.id && token.imageDataUrl);
-      const byOriginalId = new Map();
-      for (const token of storedTokens) byOriginalId.set(token.id, token);
+    function listenTokens(handlers = {}) {
+      const reference = roomPath("token/tokensById");
+      // 記住每顆 token 上一次收到的內容，才能算出這次到底改了哪些欄位。
+      const lastNodes = new Map();
 
-      const tokenOrder = Array.isArray(value.tokenOrder) ? value.tokenOrder : [];
-      const orderedTokens = tokenOrder.map((id) => byOriginalId.get(id)).filter(Boolean);
-      const orderedIds = new Set(orderedTokens.map((token) => token.id));
-      const rest = storedTokens.filter((token) => !orderedIds.has(token.id));
+      function handleNode(snapshot) {
+        const node = snapshot.val() || {};
+        const previous = lastNodes.get(snapshot.key);
+        lastNodes.set(snapshot.key, node);
+        const meta = { sourceRole: node.sourceRole === "gm" ? "gm" : "player", sourceClientId: node.sourceClientId || "" };
+        const token = stripTokenMeta(node);
 
-      return {
-        tokens: [...orderedTokens, ...rest]
+        // 沒有圖片的節點是「別人剛刪掉、這邊又送了位置更新」留下的殘骸，不能當成 token。
+        if (!token.id || !token.imageDataUrl) {
+          handlers.onGhost?.(snapshot.key);
+          return;
+        }
+        if (!previous?.id || !previous.imageDataUrl) {
+          handlers.onAdd?.(token, meta);
+          return;
+        }
+
+        const changes = {};
+        for (const [key, value] of Object.entries(token)) {
+          if (value !== previous[key]) changes[key] = value;
+        }
+        if (Object.keys(changes).length) handlers.onPatch?.(token.id, changes, meta);
+      }
+
+      const onError = (error) => console.error("[MapFog Firebase]", error);
+      reference.on("child_added", handleNode, onError);
+      reference.on("child_changed", handleNode, onError);
+      reference.on("child_removed", (snapshot) => {
+        const node = snapshot.val() || {};
+        lastNodes.delete(snapshot.key);
+        if (node.id && node.imageDataUrl) handlers.onRemove?.(node.id);
+      }, onError);
+      return function unsubscribe() {
+        reference.off();
       };
     }
 
@@ -267,33 +291,26 @@
       onGridSettings(callback) {
         return listen("gridSettings", (value) => callback(stripMeta(value)));
       },
-      sendTokenState(tokenState, includeImage = true, changedTokenId = null) {
-        if (includeImage || !Array.isArray(tokenState.tokens)) {
-          return roomPath("token").set(withMeta(toFirebaseTokenState(tokenState)));
-        }
-        // 不含圖片的狀態只能逐欄位 update；用 set() 會把所有 token 圖片一起清掉。
-        const changedTokens = changedTokenId
-          ? tokenState.tokens.filter((token) => token.id === changedTokenId)
-          : tokenState.tokens;
-        const updates = {
-          tokenOrder: tokenState.tokens.map((token) => token.id).filter(Boolean),
-          sourceClientId: clientId,
-          updatedAt: firebase.database.ServerValue.TIMESTAMP
-        };
-        for (const changed of changedTokens) {
-          if (!changed?.id) continue;
-          for (const [key, value] of Object.entries(changed)) {
-            if (key === "imageDataUrl" || value === undefined) continue;
-            updates[`tokensById/${tokenKey(changed.id)}/${key}`] = value;
-          }
-        }
-        return roomPath("token").update(updates);
+      // 新增 token 才寫入完整節點（含圖片）；之後的修改只 update 有變的欄位。
+      addToken(token, sourceRole) {
+        if (!token?.id) return Promise.resolve();
+        return tokenRef(token.id).set({ ...token, ...tokenMeta(sourceRole) });
       },
-      clearToken() {
-        return roomPath("token").remove();
+      updateToken(tokenId, changes, sourceRole) {
+        const updates = {};
+        for (const [key, value] of Object.entries(changes || {})) {
+          if (key === "id" || key === "imageDataUrl" || value === undefined) continue;
+          updates[key] = value;
+        }
+        if (!tokenId || !Object.keys(updates).length) return Promise.resolve();
+        return tokenRef(tokenId).update({ ...updates, ...tokenMeta(sourceRole) });
       },
-      onTokenState(callback) {
-        return listen("token", (value) => callback(fromFirebaseTokenState(stripMeta(value))));
+      removeToken(tokenId) {
+        if (!tokenId) return Promise.resolve();
+        return tokenRef(tokenId).remove();
+      },
+      onTokenEvents(handlers) {
+        return listenTokens(handlers);
       },
       sendInitiativeState(initiativeState) {
         return roomPath("initiative").set(withMeta(initiativeState || { entries: [] }));
