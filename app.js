@@ -708,10 +708,8 @@ function mergeTokenCollectionState(incoming = {}) {
   const rawTokens = Array.isArray(incoming.tokens) ? incoming.tokens : [];
   const existing = new Map(tokenCollectionState.tokens.map((token) => [token.id, token]));
   const tokens = rawTokens.map((raw) => normalizeTokenState({ ...(existing.get(raw.id) || {}), ...raw }));
-  const selectedTokenId = Object.prototype.hasOwnProperty.call(incoming, "selectedTokenId")
-    ? incoming.selectedTokenId
-    : tokenCollectionState.selectedTokenId;
-  return normalizeTokenCollectionState({ tokens, selectedTokenId });
+  // 選取狀態只屬於這個畫面，收到的資料就算帶了 selectedTokenId 也不採用。
+  return normalizeTokenCollectionState({ tokens, selectedTokenId: tokenCollectionState.selectedTokenId });
 }
 
 function getSelectedToken() { return tokenCollectionState.tokens.find((t) => t.id === tokenCollectionState.selectedTokenId) || null; }
@@ -747,7 +745,7 @@ function preserveProtectedTokenState(nextState) {
 
   return {
     tokens,
-    selectedTokenId: draggingTokenId || tokenCollectionState.selectedTokenId || incoming.selectedTokenId
+    selectedTokenId: draggingTokenId || tokenCollectionState.selectedTokenId
   };
 }
 
@@ -759,12 +757,12 @@ async function readStoredTokenState() {
 }
 
 function persistTokenState() {
-  writeLocalCache(TOKEN_STATE_STORAGE_KEY, tokenCollectionState);
+  // 共用暫存只放 token 本身；選取狀態只留在這個畫面。
+  writeLocalCache(TOKEN_STATE_STORAGE_KEY, { tokens: tokenCollectionState.tokens });
 }
 
 function getBroadcastTokenState(includeImage = true) {
   return {
-    selectedTokenId: tokenCollectionState.selectedTokenId,
     tokens: tokenCollectionState.tokens.map((token) => {
       if (includeImage) return { ...token };
       const { imageDataUrl, ...lightToken } = token;
@@ -906,7 +904,7 @@ function setTokenState(nextState, options = {}) {
 
 function selectToken(tokenId) {
   if (!tokenCollectionState.tokens.some((t) => t.id === tokenId)) return;
-  setTokenCollectionState({ ...tokenCollectionState, selectedTokenId: tokenId }, { includeImage: false, changedTokenId: tokenId });
+  setTokenCollectionState({ ...tokenCollectionState, selectedTokenId: tokenId }, { sync: false, persist: false });
 }
 
 function removeSelectedToken() {
@@ -2061,7 +2059,8 @@ function applyIncomingTokenState(tokenState, options = {}) {
     queuedTokenUpdates.push({ tokenState, merge: Boolean(options.merge) });
     return;
   }
-  setTokenCollectionState(preserveProtectedTokenState(tokenState), { sync: false, merge: Boolean(options.merge) });
+  const nextState = { ...preserveProtectedTokenState(tokenState), selectedTokenId: tokenCollectionState.selectedTokenId };
+  setTokenCollectionState(nextState, { sync: false, merge: Boolean(options.merge) });
 }
 
 function flushQueuedTokenUpdates() {

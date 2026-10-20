@@ -142,14 +142,13 @@
       }
 
       return {
-        selectedTokenId: tokenState.selectedTokenId || null,
         tokenOrder,
         tokensById
       };
     }
 
     function fromFirebaseTokenState(value = {}) {
-      if (Array.isArray(value.tokens)) return value;
+      if (Array.isArray(value.tokens)) return { tokens: value.tokens };
       if (!value.tokensById || typeof value.tokensById !== "object") return value;
 
       // 沒有圖片的節點是「別人剛刪掉、這邊又送了位置更新」留下的殘骸，不能當成 token。
@@ -163,7 +162,6 @@
       const rest = storedTokens.filter((token) => !orderedIds.has(token.id));
 
       return {
-        selectedTokenId: value.selectedTokenId || null,
         tokens: [...orderedTokens, ...rest]
       };
     }
@@ -278,7 +276,6 @@
           ? tokenState.tokens.filter((token) => token.id === changedTokenId)
           : tokenState.tokens;
         const updates = {
-          selectedTokenId: tokenState.selectedTokenId || null,
           tokenOrder: tokenState.tokens.map((token) => token.id).filter(Boolean),
           sourceClientId: clientId,
           updatedAt: firebase.database.ServerValue.TIMESTAMP
