@@ -486,7 +486,7 @@ function setTokenPanelOpen(open) {
   if (!tokenPanel || !tokenSettingsBtn) return;
   tokenPanel.hidden = !open;
   tokenSettingsBtn.setAttribute("aria-expanded", String(open));
-  tokenSettingsBtn.classList.toggle("active", open || tokenCollectionState.tokens.length > 0);
+  tokenSettingsBtn.classList.toggle("active", open);
 }
 
 function updateTokenControls() {

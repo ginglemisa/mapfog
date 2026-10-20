@@ -1,5 +1,4 @@
 /* Touch-tablet GM layout. Enabled by tablet-ui.js, never on pointer-fine desktop. */
-.gm-page .tablet-controls-heading { display: none; }
 .gm-page.tablet-layout { -webkit-tap-highlight-color: transparent; }
 .gm-page.tablet-layout .floating-toolbar {
   top: max(10px, env(safe-area-inset-top));
@@ -28,65 +27,11 @@
   overflow: visible;
 }
 
-/* Map settings are closed by default and become a fixed, scrollable drawer. */
-.gm-page.tablet-layout .controls-panel,
-.gm-page.tablet-layout .controls-panel.collapsed {
-  display: none;
-  position: fixed;
-  top: calc(69px + env(safe-area-inset-top));
-  right: max(12px, env(safe-area-inset-right));
-  bottom: auto;
-  z-index: 39;
-  width: min(362px, calc(100vw - 24px));
-  max-height: calc(100dvh - 83px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-  margin: 0;
-  padding: 14px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  border-radius: 14px;
-  background: rgba(11, 18, 32, .97);
-}
-.gm-page.tablet-layout .controls-panel.tablet-open { display: block; }
-.gm-page.tablet-layout .controls-toggle { display: none; }
-.gm-page.tablet-layout .controls-body { display: grid; gap: 12px; }
-.gm-page.tablet-layout .controls-panel .toolbar,
-.gm-page.tablet-layout .controls-panel.collapsed .toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-}
-.gm-page.tablet-layout .controls-panel.collapsed .field-upload,
-.gm-page.tablet-layout .controls-panel.collapsed .zoom-field { display: flex; }
-.gm-page.tablet-layout .controls-panel.collapsed .footer-note,
-.gm-page.tablet-layout .controls-panel.collapsed .mode-note { display: block; }
-.gm-page.tablet-layout .controls-panel.collapsed .cache-actions { display: flex; }
-.gm-page.tablet-layout .controls-panel.collapsed .slider-field { flex-direction: column; align-items: stretch; gap: 8px; }
 .gm-page.tablet-layout .controls-panel .cache-actions button { min-width: 0; min-height: 44px; flex: 1 1 140px; }
 .gm-page.tablet-layout .controls-panel input[type="range"] { min-height: 32px; }
-.gm-page.tablet-layout .tablet-controls-heading {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 12px; font-size: 16px; font-weight: 750;
-}
-.gm-page.tablet-layout .tablet-close-button {
-  flex: 0 0 44px; min-width: 44px; width: 44px; height: 44px;
-  padding: 0; font-size: 24px;
-}
-.gm-page .tablet-settings-toggle { display: none; }
-.gm-page.tablet-layout .tablet-settings-toggle {
-  display: inline-flex; align-items: center; justify-content: center;
-  position: fixed; right: max(12px, env(safe-area-inset-right));
-  bottom: max(12px, env(safe-area-inset-bottom)); z-index: 38;
-  width: auto; min-width: 112px; min-height: 48px;
-  padding: 0 16px; border-radius: 12px; font-weight: 750;
-  border-color: rgba(148, 163, 184, .62);
-  background: rgba(11, 18, 32, .96);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
-}
-.gm-page.tablet-layout .tablet-settings-toggle[aria-expanded="true"] {
-  border-color: var(--accent); background: #143246;
-}
 
-/* Grid, token and map adjustment drawers share the same anchor as map settings. */
+/* Map settings, grid, token and map adjustment drawers share one anchor. */
+.gm-page.tablet-layout .controls-panel,
 .gm-page.tablet-layout .grid-panel,
 .gm-page.tablet-layout .token-panel,
 .gm-page.tablet-layout .map-adjust-panel {

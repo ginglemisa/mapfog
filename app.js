@@ -15,7 +15,8 @@ const actualBtn = document.getElementById("actualBtn");
 const centerBtn = document.getElementById("centerBtn");
 const modeNote = document.getElementById("modeNote");
 const controlsPanel = document.getElementById("controlsPanel");
-const controlsCollapseBtn = document.getElementById("controlsCollapseBtn");
+const controlsPanelCloseBtn = document.getElementById("controlsPanelCloseBtn");
+const mapSettingsBtn = document.getElementById("mapSettingsBtn");
 const floatingToolbar = document.getElementById("floatingToolbar");
 const toolbarToggleBtn = document.getElementById("toolbarToggleBtn");
 const gridSettingsBtn = document.getElementById("gridSettingsBtn");
@@ -93,7 +94,6 @@ let draggingTokenId = null;
 let tokenDragOffsetX = 0;
 let tokenDragOffsetY = 0;
 
-const CONTROLS_COLLAPSED_STORAGE_KEY = "fogmap.controls.collapsed";
 const DEFAULT_SYNC_CHANNEL_NAME = "mapfog.sync.v1";
 const CONTROL_CHANNEL_NAME = "mapfog.control.v1";
 const DEFAULT_SHARED_STATE_STORAGE_KEY = "mapfog.shared.state";
@@ -164,6 +164,7 @@ const mapAdjust = window.MapFogMapAdjust?.create({
   canvas: mapCanvas,
   storageKey: GM_MAP_ADJUST_STORAGE_KEY,
   onOpen: () => {
+    setControlsPanelOpen(false);
     setGridPanelOpen(false);
     setTokenPanelOpen(false);
   }
@@ -490,6 +491,7 @@ function updateModeButton() {
   if (rectFogBtn) {
     const rectActive = drawingTool === "rect";
     rectFogBtn.classList.toggle("active", rectActive);
+    rectFogBtn.setAttribute("aria-pressed", String(rectActive));
     rectFogBtn.title = rectActive ? `目前模式：矩形${actionLabel}` : "矩形擦除／補上迷霧";
     rectFogBtn.setAttribute("aria-label", rectActive ? `目前模式：矩形${actionLabel}` : "矩形擦除或補上迷霧模式");
   }
@@ -501,6 +503,7 @@ function updateModeNote() {
 
   if (panModeBtn) {
     panModeBtn.classList.toggle("active", isPanMode);
+    panModeBtn.setAttribute("aria-pressed", String(isPanMode));
     panModeBtn.title = isPanMode ? "目前是平移模式：拖曳地圖，不會擦除迷霧。" : `目前是${drawingLabel}：左鍵拖曳會${actionLabel}，右鍵拖曳會移動地圖。`;
   }
   modeNote.textContent = isPanMode
@@ -616,7 +619,7 @@ function setGridPanelOpen(open) {
 
   gridPanel.hidden = !open;
   gridSettingsBtn.setAttribute("aria-expanded", String(open));
-  gridSettingsBtn.classList.toggle("active", open || gridSettings.enabled);
+  gridSettingsBtn.classList.toggle("active", open);
 }
 
 function updateGridControls() {
@@ -638,8 +641,6 @@ function updateGridControls() {
   gridOffsetY.value = Math.round(gridSettings.offsetY);
   gridOffsetYValue.textContent = `${Math.round(gridSettings.offsetY)}px`;
 
-  gridSettingsBtn?.classList.toggle("active", !gridPanel?.hidden || gridSettings.enabled);
-  gridSettingsBtn?.setAttribute("aria-pressed", String(gridSettings.enabled));
   gridSettingsBtn.title = gridSettings.enabled ? "格線設定（已開啟）" : "格線設定";
   if (saveGridImageBtn) saveGridImageBtn.disabled = !currentImage;
   if (saveAdjustedMapBtn) saveAdjustedMapBtn.disabled = !currentImage;
@@ -829,7 +830,7 @@ function setTokenPanelOpen(open) {
   if (open && tokenPanel.parentElement !== document.body) document.body.appendChild(tokenPanel);
   tokenPanel.hidden = !open;
   tokenSettingsBtn.setAttribute("aria-expanded", String(open));
-  tokenSettingsBtn.classList.toggle("active", open || tokenCollectionState.tokens.length > 0);
+  tokenSettingsBtn.classList.toggle("active", open);
 }
 
 function updateTokenControls() {
@@ -1102,29 +1103,12 @@ function saveAdjustedMapAsJpg() {
   saveMapImageAsJpg({ includeGrid: false, suffix: "adjusted" });
 }
 
-function readStoredControlsCollapsed() {
-  try {
-    return window.localStorage.getItem(CONTROLS_COLLAPSED_STORAGE_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
+function setControlsPanelOpen(open) {
+  if (!controlsPanel || !mapSettingsBtn) return;
 
-function setControlsCollapsed(collapsed) {
-  if (!controlsPanel || !controlsCollapseBtn) return;
-
-  controlsPanel.classList.toggle("collapsed", collapsed);
-
-  const title = collapsed ? "展開上方控制區" : "收起上方控制區";
-  controlsCollapseBtn.title = title;
-  controlsCollapseBtn.setAttribute("aria-label", title);
-  controlsCollapseBtn.setAttribute("aria-expanded", String(!collapsed));
-
-  try {
-    window.localStorage.setItem(CONTROLS_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
-  } catch {
-    // Ignore storage failures and keep the UI usable.
-  }
+  controlsPanel.hidden = !open;
+  mapSettingsBtn.setAttribute("aria-expanded", String(open));
+  mapSettingsBtn.classList.toggle("active", open);
 }
 
 function removeLocalStorageByPrefix(prefix) {
@@ -2223,12 +2207,25 @@ toolbarToggleBtn?.addEventListener("click", () => {
 // Keep the native grid/token button and ARIA state in sync with tablet drawers.
 document.addEventListener("mapfog:tablet-close-native-panels", (event) => {
   if (!document.body.classList.contains("tablet-layout")) return;
+  if (event.detail?.except !== "controls") setControlsPanelOpen(false);
   if (event.detail?.except !== "grid") setGridPanelOpen(false);
   if (event.detail?.except !== "token") setTokenPanelOpen(false);
   if (event.detail?.except !== "mapAdjust") mapAdjust?.setOpen(false);
 });
 
+mapSettingsBtn?.addEventListener("click", () => {
+  setGridPanelOpen(false);
+  setTokenPanelOpen(false);
+  mapAdjust?.setOpen(false);
+  setControlsPanelOpen(controlsPanel?.hidden);
+});
+
+controlsPanelCloseBtn?.addEventListener("click", () => {
+  setControlsPanelOpen(false);
+});
+
 gridSettingsBtn?.addEventListener("click", () => {
+  setControlsPanelOpen(false);
   setTokenPanelOpen(false);
   mapAdjust?.setOpen(false);
   setGridPanelOpen(gridPanel?.hidden);
@@ -2239,6 +2236,7 @@ gridPanelCloseBtn?.addEventListener("click", () => {
 });
 
 tokenSettingsBtn?.addEventListener("click", () => {
+  setControlsPanelOpen(false);
   setGridPanelOpen(false);
   mapAdjust?.setOpen(false);
   setTokenPanelOpen(tokenPanel?.hidden);
@@ -2385,11 +2383,6 @@ gridNudgeButtons.forEach((button) => {
 saveGridImageBtn?.addEventListener("click", saveGridImageAsJpg);
 saveAdjustedMapBtn?.addEventListener("click", saveAdjustedMapAsJpg);
 
-controlsCollapseBtn?.addEventListener("click", () => {
-  const collapsed = controlsPanel?.classList.contains("collapsed");
-  setControlsCollapsed(!collapsed);
-});
-
 clearCurrentOlroomBtn?.addEventListener("click", clearCurrentOlroomCache);
 clearAllOlroomsBtn?.addEventListener("click", clearAllOlroomCaches);
 sendPlayersToRoomBtn?.addEventListener("click", sendPlayersToCurrentRoom);
@@ -2403,7 +2396,7 @@ updateOlroomCacheControls();
 updateTokenControls();
 setTokenPanelOpen(false);
 whenFirebaseReady(attachFirebaseSync);
-setControlsCollapsed(readStoredControlsCollapsed());
+setControlsPanelOpen(false);
 applyTransform();
 
 async function restoreLocalState() {

@@ -131,16 +131,18 @@
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
     }
-    .tool-button:hover {
-      border-color: #38bdf8;
-      background: rgba(15, 23, 42, 0.88);
+    @media (hover: hover) {
+      .tool-button:hover {
+        border-color: #38bdf8;
+        background: rgba(15, 23, 42, 0.88);
+      }
+      .tool-button.danger:hover {
+        border-color: #ef4444;
+      }
     }
     .tool-button.active {
       border-color: var(--accent);
       box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.22) inset;
-    }
-    .tool-button.danger:hover {
-      border-color: #ef4444;
     }
     .tool-button svg {
       width: 22px;
@@ -281,7 +283,7 @@
       }
     }
   </style>
-  <link rel="stylesheet" href="toolbar-ui.css">
+  <link rel="stylesheet" href="toolbar-ui.css?v=20261021-toolbar-active">
   <link rel="stylesheet" href="map-adjust.css">
 </head>
 <body class="player-page">
@@ -379,8 +381,8 @@
   <script src="firebase-sync.js"></script>
   <script src="local-store.js"></script>
   <script src="dice.js"></script>
-  <script src="map-adjust.js"></script>
-  <script src="player.js"></script>
+  <script src="map-adjust.js?v=20261021-toolbar-active"></script>
+  <script src="player.js?v=20261021-toolbar-active"></script>
   <script src="initiative-sync.js?v=20260701-panel-drag"></script>
 </body>
 </html>

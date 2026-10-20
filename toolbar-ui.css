@@ -9,6 +9,14 @@
   flex: 0 0 auto;
 }
 
+/* "On" state is filled, so it can't be confused with a hover border (sticky after a tap on touch screens). */
+.floating-toolbar > .tool-button.active {
+  border-color: var(--accent);
+  background: rgba(56, 189, 248, 0.22);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.5) inset;
+}
+
 .floating-toolbar.collapsed {
   top: max(12px, env(safe-area-inset-top));
   left: max(12px, env(safe-area-inset-left));

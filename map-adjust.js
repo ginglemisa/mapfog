@@ -144,7 +144,7 @@
     }
 
     function updateButton() {
-      button?.classList.toggle("active", isOpen() || !isDefaultValues(values));
+      button?.classList.toggle("active", isOpen());
     }
 
     function render() {
