@@ -14,6 +14,7 @@
       .then(() => startFirebaseSync(requestedRoom || "default"))
       .catch((error) => {
         console.error("[MapFog Firebase]", error);
+        window.dispatchEvent(new CustomEvent("mapfog:firebase-error", { detail: { message: String(error?.message || error) } }));
       });
   }
 
@@ -380,9 +381,40 @@
       }
     };
 
+    // 連線狀態與在線名單：rooms/{room}/presence/{clientId}，斷線時由 Firebase 自動移除。
+    const role = document.body.classList.contains("gm-page") ? "gm" : "player";
+    const connectionState = { role, connected: false, everConnected: false, players: 0, gms: 0 };
+    const presenceRef = roomPath(`presence/${clientId}`);
+
+    function emitConnectionState() {
+      window.dispatchEvent(new CustomEvent("mapfog:connection", { detail: { ...connectionState } }));
+    }
+
+    database.ref(".info/connected").on("value", (snapshot) => {
+      connectionState.connected = snapshot.val() === true;
+      if (connectionState.connected) {
+        connectionState.everConnected = true;
+        // 先登記「斷線時移除」，再寫入在線資料，避免斷線後留下殘留紀錄。
+        presenceRef.onDisconnect().remove()
+          .then(() => presenceRef.set({ role, connectedAt: firebase.database.ServerValue.TIMESTAMP }))
+          .catch(logError);
+      }
+      emitConnectionState();
+    });
+
+    roomPath("presence").on("value", (snapshot) => {
+      const entries = Object.values(snapshot.val() || {});
+      connectionState.players = entries.filter((entry) => entry?.role === "player").length;
+      connectionState.gms = entries.filter((entry) => entry?.role === "gm").length;
+      emitConnectionState();
+    }, logError);
+
+    api.getConnectionState = () => ({ ...connectionState });
+
     window.MapFogFirebaseSync = api;
     console.info("[MapFog Firebase] connected", { roomId, clientId });
     window.dispatchEvent(new CustomEvent("mapfog:firebase-ready", { detail: api }));
+    emitConnectionState();
   }
 
   function sanitizeRoomId(value) {
