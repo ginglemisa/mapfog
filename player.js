@@ -311,6 +311,7 @@ function normalizeTokenState(state = {}) {
   return {
     id: typeof state.id === "string" && state.id ? state.id : createTokenId(),
     name: typeof state.name === "string" ? state.name.trim() : "",
+    initiativeLabel: typeof state.initiativeLabel === "string" ? state.initiativeLabel.trim() : "",
     imageDataUrl,
     x: Number.isFinite(Number(state.x)) ? Number(state.x) : (mapCanvas.width ? mapCanvas.width / 2 : 0),
     y: Number.isFinite(Number(state.y)) ? Number(state.y) : (mapCanvas.height ? mapCanvas.height / 2 : 0),

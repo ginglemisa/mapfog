@@ -632,6 +632,7 @@ function normalizeTokenState(state = {}) {
   return {
     id: typeof state.id === "string" && state.id ? state.id : createTokenId(),
     name: typeof state.name === "string" ? state.name.trim() : "",
+    initiativeLabel: typeof state.initiativeLabel === "string" ? state.initiativeLabel.trim() : "",
     imageDataUrl,
     x: Number.isFinite(Number(state.x)) ? Number(state.x) : (mapCanvas.width ? mapCanvas.width / 2 : 0),
     y: Number.isFinite(Number(state.y)) ? Number(state.y) : (mapCanvas.height ? mapCanvas.height / 2 : 0),
@@ -881,6 +882,20 @@ function createCenteredTokenDataUrl(sourceDataUrl) {
   });
 }
 
+function getInitiativeTokenInitial(name) {
+  return name.match(/[A-Za-z\p{Script=Han}]/u)?.[0] || Array.from(name)[0] || "?";
+}
+
+function getNextInitiativeTokenLabel(initial) {
+  const usedLabels = new Set(tokenCollectionState.tokens.map((token) => {
+    // Older initiative tokens have a name but no stored label.
+    return token.initiativeLabel || (token.name ? getInitiativeTokenInitial(token.name) : "");
+  }));
+  let label = initial;
+  for (let suffix = 1; usedLabels.has(label); suffix += 1) label = `${initial}${suffix}`;
+  return label;
+}
+
 function createInitiativeToken(entry, clientPoint = null) {
   if (!currentImage) return { error: "請先上傳地圖，再建立 token。" };
 
@@ -891,7 +906,7 @@ function createInitiativeToken(entry, clientPoint = null) {
   }
 
   const name = String(entry.name || "").trim();
-  const initial = name.match(/[A-Za-z\p{Script=Han}]/u)?.[0] || Array.from(name)[0] || "?";
+  const label = getNextInitiativeTokenLabel(getInitiativeTokenInitial(name));
   const canvas = document.createElement("canvas");
   canvas.width = TOKEN_CROP_SIZE;
   canvas.height = TOKEN_CROP_SIZE;
@@ -901,12 +916,18 @@ function createInitiativeToken(entry, clientPoint = null) {
   ctx.fillStyle = "#ffffff";
   ctx.font = `700 ${TOKEN_CROP_SIZE * 0.64}px system-ui, -apple-system, "Segoe UI", sans-serif`;
   ctx.textAlign = "center";
-  const metrics = ctx.measureText(initial);
+  const maxTextWidth = TOKEN_CROP_SIZE * 0.84;
+  const textWidth = ctx.measureText(label).width;
+  if (textWidth > maxTextWidth) {
+    ctx.font = `700 ${TOKEN_CROP_SIZE * 0.64 * maxTextWidth / textWidth}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  }
+  const metrics = ctx.measureText(label);
   const textY = (TOKEN_CROP_SIZE + metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
-  ctx.fillText(initial, TOKEN_CROP_SIZE / 2, textY, TOKEN_CROP_SIZE * 0.84);
+  ctx.fillText(label, TOKEN_CROP_SIZE / 2, textY);
 
   const token = normalizeTokenState({
     name,
+    initiativeLabel: label,
     imageDataUrl: canvas.toDataURL("image/png"),
     visible: true,
     x: roundCanvasValue(point.x),
