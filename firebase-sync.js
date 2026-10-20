@@ -52,6 +52,8 @@
     const roomId = sanitizeRoomId(rawRoomId);
     const clientId = (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     let eventSequence = 0;
+    // 擦霧、迷霧指令、擲骰各自只保留最近幾筆；迷霧的持久保存靠 fogHistory，不靠這些事件。
+    const EVENT_KEEP_LIMIT = 100;
 
     function roomPath(path) {
       return database.ref(`rooms/${roomId}/${path}`);
@@ -97,32 +99,88 @@
       });
     }
 
+    function logError(error) {
+      console.error("[MapFog Firebase]", error);
+    }
+
+    // 每種事件清單各自記住看過的 key（由舊到新），寫入端靠它刪除超過上限的舊事件。
+    const eventKeysByPath = new Map();
+
+    function getEventKeys(path) {
+      if (!eventKeysByPath.has(path)) eventKeysByPath.set(path, { keys: [], seen: new Set(), trimming: false });
+      return eventKeysByPath.get(path);
+    }
+
+    function trackEventKey(path, key) {
+      const state = getEventKeys(path);
+      if (!key || state.seen.has(key)) return;
+      state.seen.add(key);
+      state.keys.push(key);
+      state.keys.sort();
+    }
+
+    function trimEventList(path) {
+      const state = getEventKeys(path);
+      if (state.trimming || state.keys.length <= EVENT_KEEP_LIMIT) return;
+
+      const oldestKeptKey = state.keys[state.keys.length - EVENT_KEEP_LIMIT];
+      state.keys = state.keys.slice(-EVENT_KEEP_LIMIT);
+      state.seen = new Set(state.keys);
+      state.trimming = true;
+      // 只讀取比保留範圍更舊、準備刪掉的事件，不必下載整份清單。
+      roomPath(path).orderByKey().endBefore(oldestKeptKey).once("value")
+        .then((snapshot) => {
+          const removals = {};
+          snapshot.forEach((child) => {
+            removals[child.key] = null;
+          });
+          if (Object.keys(removals).length) return roomPath(path).update(removals);
+          return null;
+        })
+        .catch(logError)
+        .finally(() => {
+          state.trimming = false;
+          // 刪除期間若又新增了事件，接著再整理一次。
+          trimEventList(path);
+        });
+    }
+
+    // 事件改成 push 到清單，快速連續寫入也不會只剩最後一筆。
+    function sendEvent(path, payload) {
+      const pushed = roomPath(path).push(makeEventPayload(payload));
+      trackEventKey(path, pushed.key);
+      pushed.catch(logError);
+      trimEventList(path);
+      return pushed;
+    }
+
     function listenEvent(path, callback) {
       const reference = roomPath(path);
-      let isInitialValue = true;
-      let lastEventId = null;
-      reference.on(
-        "value",
-        (snapshot) => {
-          const value = snapshot.val();
-          // 第一次回呼是掛上監聽前就存在的舊事件，不重播。不拿 updatedAt（伺服器時間）
-          // 跟本機時鐘比，避免本機時鐘偏快時把剛發生的擦霧、擲骰當成舊事件丟掉。
-          const wasInitialValue = isInitialValue;
-          isInitialValue = false;
-          if (wasInitialValue || !value || value.sourceClientId === clientId) return;
+      let query = null;
+      let active = true;
 
-          const eventId = value.id || `${value.sourceClientId || "unknown"}:${value.updatedAt || ""}:${value.sequence || ""}`;
-          if (eventId && eventId === lastEventId) return;
-          lastEventId = eventId;
+      // 只處理掛上監聽「之後」才新增的事件：先找出目前最後一筆的 key，再從它之後開始聽。
+      // 不拿伺服器時間跟本機時鐘比，避免本機時鐘偏差時把剛發生的事件當成舊的丟掉。
+      reference.orderByKey().limitToLast(1).once("value")
+        .then((snapshot) => {
+          if (!active) return;
+          let lastKey = null;
+          snapshot.forEach((child) => {
+            lastKey = child.key;
+          });
+          query = lastKey ? reference.orderByKey().startAfter(lastKey) : reference.orderByKey();
+          query.on("child_added", (child) => {
+            trackEventKey(path, child.key);
+            const value = child.val();
+            if (!value || value.sourceClientId === clientId) return;
+            callback(value);
+          }, logError);
+        })
+        .catch(logError);
 
-          callback(value);
-        },
-        (error) => {
-          console.error("[MapFog Firebase]", error);
-        }
-      );
       return function unsubscribe() {
-        reference.off("value");
+        active = false;
+        query?.off("child_added");
       };
     }
 
@@ -245,9 +303,7 @@
         return listen("fog", (value) => callback(stripMeta(value)));
       },
       sendDrawBatch(strokes) {
-        return roomPath("events/drawBatch").set(makeEventPayload({
-          strokes
-        }));
+        return sendEvent("events/drawBatch", { strokes });
       },
       onDrawBatch(callback) {
         return listenEvent("events/drawBatch", (value) => callback(Array.isArray(value.strokes) ? value.strokes : []));
@@ -276,9 +332,7 @@
         return roomPath("fogHistory").once("value").then((snapshot) => normalizeFogHistory(snapshot.val() || {}));
       },
       sendFogCommand(command) {
-        return roomPath("events/fogCommand").set(makeEventPayload({
-          command
-        }));
+        return sendEvent("events/fogCommand", { command });
       },
       onFogCommand(callback) {
         return listenEvent("events/fogCommand", (value) => {
@@ -319,7 +373,7 @@
         return listen("initiative", (value) => callback(stripMeta(value)));
       },
       sendDiceRoll(roll) {
-        return roomPath("events/diceRoll").set(makeEventPayload(roll || {}));
+        return sendEvent("events/diceRoll", roll || {});
       },
       onDiceRoll(callback) {
         return listenEvent("events/diceRoll", (value) => callback(stripMeta(value)));
