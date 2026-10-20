@@ -270,6 +270,9 @@
     .map-token.dragging {
       cursor: grabbing;
     }
+    .map-token.selected {
+      z-index: 1;
+    }
     .map-token img {
       display: block;
       width: 100%;
@@ -659,6 +662,7 @@
 
   </style>
   <link rel="stylesheet" href="toolbar-ui.css">
+  <link rel="stylesheet" href="map-adjust.css">
   <link rel="stylesheet" href="tablet-ui.css">
 </head>
 <body class="gm-page">
@@ -690,6 +694,7 @@
         操作方式：滑鼠滾輪可縮放；用上方圖示切換拖曳模式；雙指手勢可在觸控裝置上縮放與移動。
       </div>
       <div class="cache-actions" aria-label="本機暫存管理">
+        <button id="sendPlayersToRoomBtn" type="button">玩家畫面切到此房間</button>
         <button id="clearCurrentOlroomBtn" class="danger" type="button">清除目前 olroom 暫存</button>
         <button id="clearAllOlroomsBtn" class="danger" type="button">清除所有 olroom 暫存</button>
       </div>
@@ -738,6 +743,10 @@
 
           <button id="tokenSettingsBtn" class="tool-button" type="button" title="Token 設定" aria-label="Token 設定" aria-controls="tokenPanel" aria-expanded="false">
             <svg viewBox="0 0 24 24"><path d="M12 3l7 4v10l-7 4-7-4V7z"/><path d="M12 7l3.5 2v6L12 17l-3.5-2V9z"/></svg>
+          </button>
+
+          <button id="mapAdjustBtn" class="tool-button" type="button" title="地圖調整" aria-label="地圖調整" aria-controls="mapAdjustPanel" aria-expanded="false">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M4.93 19.07l1.41-1.41"/><path d="M17.66 6.34l1.41-1.41"/></svg>
           </button>
 
           <button id="resetFogBtn" class="tool-button danger" type="button" title="重新蓋上迷霧" aria-label="重新蓋上迷霧">
@@ -861,6 +870,15 @@
             <button id="tokenHexBtn" type="button">六角形</button>
           </div>
 
+          <div class="token-slider">
+            <div class="token-control-line">
+              <label for="tokenHpFontSize">HP 字體大小</label>
+              <span id="tokenHpFontSizeValue" class="token-value">24px</span>
+            </div>
+            <input id="tokenHpFontSize" type="range" min="8" max="96" step="1" value="24" disabled>
+          </div>
+          <button id="tokenAddInitiativeBtn" class="token-upload-button" type="button" disabled>加入先攻</button>
+          <div class="token-hp-help">HP 取自先攻表，僅 GM 可見。</div>
           <button id="tokenClearBtn" class="token-clear-button danger" type="button">移除 token</button>
           <div id="tokenStatus" class="token-status">尚未上傳 token</div>
         </div>
@@ -877,10 +895,47 @@
     </div>
   </div>
 
-  <script src="https://www.gstatic.com/firebasejs/12.13.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/12.13.0/firebase-database-compat.js"></script>
+  <div id="mapAdjustPanel" class="map-adjust-panel" role="region" aria-label="地圖調整" hidden>
+    <div class="map-adjust-header">
+      <span class="map-adjust-title">地圖調整</span>
+      <button id="mapAdjustCloseBtn" class="map-adjust-close-button" type="button" title="收起地圖調整" aria-label="收起地圖調整">
+        <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+    </div>
+
+    <div class="map-adjust-slider">
+      <div class="map-adjust-line">
+        <label for="mapBrightness">亮度</label>
+        <span id="mapBrightnessValue" class="map-adjust-value">100%</span>
+      </div>
+      <input id="mapBrightness" type="range" min="50" max="200" step="1" value="100">
+    </div>
+
+    <div class="map-adjust-slider">
+      <div class="map-adjust-line">
+        <label for="mapContrast">對比</label>
+        <span id="mapContrastValue" class="map-adjust-value">100%</span>
+      </div>
+      <input id="mapContrast" type="range" min="50" max="175" step="1" value="100">
+    </div>
+
+    <div class="map-adjust-slider">
+      <div class="map-adjust-line">
+        <label for="mapSaturation">飽和度</label>
+        <span id="mapSaturationValue" class="map-adjust-value">100%</span>
+      </div>
+      <input id="mapSaturation" type="range" min="0" max="200" step="1" value="100">
+    </div>
+
+    <button id="mapAdjustResetBtn" class="map-adjust-action" type="button">恢復預設</button>
+    <button id="saveAdjustedMapBtn" class="map-adjust-action primary" type="button" disabled>另存調整後地圖</button>
+    <div class="map-adjust-note">只影響這台裝置的地圖底圖顯示，不會同步給玩家。</div>
+  </div>
+
   <script src="firebase-sync.js"></script>
+  <script src="local-store.js"></script>
   <script src="dice.js"></script>
+  <script src="map-adjust.js"></script>
   <script src="app.js"></script>
   <script src="initiative-sync.js?v=20260701-panel-drag"></script>
   <script src="tablet-ui.js"></script>

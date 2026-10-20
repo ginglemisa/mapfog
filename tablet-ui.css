@@ -86,9 +86,10 @@
   border-color: var(--accent); background: #143246;
 }
 
-/* Grid and token drawers share the same anchor as map settings. */
+/* Grid, token and map adjustment drawers share the same anchor as map settings. */
 .gm-page.tablet-layout .grid-panel,
-.gm-page.tablet-layout .token-panel {
+.gm-page.tablet-layout .token-panel,
+.gm-page.tablet-layout .map-adjust-panel {
   top: calc(69px + env(safe-area-inset-top));
   right: max(12px, env(safe-area-inset-right));
   width: min(362px, calc(100vw - 24px));
@@ -103,6 +104,13 @@
 .gm-page.tablet-layout .grid-nudge { grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); }
 .gm-page.tablet-layout .grid-panel-body { grid-template-columns: 136px minmax(0, 1fr); }
 .gm-page.tablet-layout .token-panel button { min-height: 44px; }
+.gm-page.tablet-layout .map-adjust-panel {
+  top: calc(84px + env(safe-area-inset-top));
+  max-height: calc(100dvh - 98px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+}
+.gm-page.tablet-layout .map-adjust-panel .map-adjust-action { min-height: 44px; }
+.gm-page.tablet-layout .map-adjust-panel .map-adjust-close-button { min-width: 44px; width: 44px; height: 44px; }
+.gm-page.tablet-layout .map-adjust-slider input[type="range"] { min-height: 32px; }
 
 /* Specificity beats initiative/dice styles injected dynamically by JS. */
 .gm-page.tablet-layout #initiativePanel.gm-initiative-panel {

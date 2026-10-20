@@ -38,6 +38,7 @@ const gridOffsetY = document.getElementById("gridOffsetY");
 const gridOffsetYValue = document.getElementById("gridOffsetYValue");
 const gridNudgeButtons = document.querySelectorAll("[data-grid-nudge-x], [data-grid-nudge-y]");
 const saveGridImageBtn = document.getElementById("saveGridImageBtn");
+const saveAdjustedMapBtn = document.getElementById("saveAdjustedMapBtn");
 const tokenSettingsBtn = document.getElementById("tokenSettingsBtn");
 const tokenPanel = document.getElementById("tokenPanel");
 const tokenPanelCloseBtn = document.getElementById("tokenPanelCloseBtn");
@@ -52,6 +53,7 @@ const tokenStatus = document.getElementById("tokenStatus");
 const tokenSelect = document.getElementById("tokenSelect");
 const clearCurrentOlroomBtn = document.getElementById("clearCurrentOlroomBtn");
 const clearAllOlroomsBtn = document.getElementById("clearAllOlroomsBtn");
+const sendPlayersToRoomBtn = document.getElementById("sendPlayersToRoomBtn");
 
 const viewport = document.getElementById("viewport");
 const emptyState = document.getElementById("emptyState");
@@ -93,6 +95,7 @@ let tokenDragOffsetY = 0;
 
 const CONTROLS_COLLAPSED_STORAGE_KEY = "fogmap.controls.collapsed";
 const DEFAULT_SYNC_CHANNEL_NAME = "mapfog.sync.v1";
+const CONTROL_CHANNEL_NAME = "mapfog.control.v1";
 const DEFAULT_SHARED_STATE_STORAGE_KEY = "mapfog.shared.state";
 const DEFAULT_SHARED_MAP_STORAGE_KEY = "mapfog.shared.map.v1";
 const DEFAULT_SHARED_FOG_STORAGE_KEY = "mapfog.shared.fog.v1";
@@ -103,6 +106,8 @@ const DEFAULT_INITIATIVE_PUBLIC_STATE_STORAGE_KEY = "mapfog.initiative.public.v1
 const LEGACY_TOKEN_STATE_STORAGE_KEY = "mapfog.token.state";
 const DEFAULT_GM_VIEW_STATE_STORAGE_KEY = "mapfog.view.gm.v1";
 const DEFAULT_PLAYER_VIEW_STATE_STORAGE_KEY = "mapfog.view.player.v1";
+const DEFAULT_GM_MAP_ADJUST_STORAGE_KEY = "mapfog.mapAdjust.gm.v1";
+const DEFAULT_PLAYER_MAP_ADJUST_STORAGE_KEY = "mapfog.mapAdjust.player.v1";
 const OLROOM_STORAGE_PREFIX = "mapfog.olroom.";
 const DEFAULT_LOCAL_CACHE_KEYS = [
   DEFAULT_SHARED_STATE_STORAGE_KEY,
@@ -114,7 +119,9 @@ const DEFAULT_LOCAL_CACHE_KEYS = [
   DEFAULT_INITIATIVE_PUBLIC_STATE_STORAGE_KEY,
   LEGACY_TOKEN_STATE_STORAGE_KEY,
   DEFAULT_GM_VIEW_STATE_STORAGE_KEY,
-  DEFAULT_PLAYER_VIEW_STATE_STORAGE_KEY
+  DEFAULT_PLAYER_VIEW_STATE_STORAGE_KEY,
+  DEFAULT_GM_MAP_ADJUST_STORAGE_KEY,
+  DEFAULT_PLAYER_MAP_ADJUST_STORAGE_KEY
 ];
 const TOKEN_DEFAULT_SIZE = 96;
 const TOKEN_MIN_SIZE = 16;
@@ -122,7 +129,7 @@ const TOKEN_MAX_SIZE = 800;
 const TOKEN_CROP_SIZE = 512;
 const CONTROL_SYNC_DEBOUNCE_MS = 300;
 const TOKEN_SYNC_THROTTLE_MS = 300;
-const SNAPSHOT_PERSIST_DELAY_MS = 3000;
+const SNAPSHOT_PERSIST_DELAY_MS = 1000;
 const VIEW_STATE_PERSIST_DELAY_MS = 300;
 const LOCAL_TOKEN_PROTECTION_MS = 2000;
 const FOG_HISTORY_COMPACT_BATCH_LIMIT = 200;
@@ -146,7 +153,21 @@ const SHARED_FOG_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}f
 const SHARED_GRID_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}grid.v1` : DEFAULT_SHARED_GRID_STORAGE_KEY;
 const TOKEN_STATE_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}tokens.v2` : DEFAULT_TOKEN_STATE_STORAGE_KEY;
 const GM_VIEW_STATE_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}gmView.v1` : DEFAULT_GM_VIEW_STATE_STORAGE_KEY;
-const syncChannel = "BroadcastChannel" in window ? new BroadcastChannel(SYNC_CHANNEL_NAME) : null;
+const GM_MAP_ADJUST_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}gmMapAdjust.v1` : DEFAULT_GM_MAP_ADJUST_STORAGE_KEY;
+// Firebase room 已經同步一切；同機再走 BroadcastChannel 會讓柔邊擦霧被套用兩次。
+const syncChannel = !IS_FIREBASE_ROOM && "BroadcastChannel" in window ? new BroadcastChannel(SYNC_CHANNEL_NAME) : null;
+// 跨房間的控制訊息（切換玩家房間、清除暫存），不分 olroom。
+const controlChannel = !IS_FIREBASE_ROOM && "BroadcastChannel" in window ? new BroadcastChannel(CONTROL_CHANNEL_NAME) : null;
+const localStore = window.MapFogLocalStore;
+// Display-only adjustment for this GM browser; never broadcast or written into map snapshots.
+const mapAdjust = window.MapFogMapAdjust?.create({
+  canvas: mapCanvas,
+  storageKey: GM_MAP_ADJUST_STORAGE_KEY,
+  onOpen: () => {
+    setGridPanelOpen(false);
+    setTokenPanelOpen(false);
+  }
+}) ?? null;
 
 let tokenCollectionState = createDefaultTokenCollectionState();
 let firebaseSync = null;
@@ -170,6 +191,10 @@ let compactingFirebaseFogHistory = false;
 let firebaseFogHistoryCompactPromise = null;
 let firebaseFogHistoryApplySeq = 0;
 let suppressBeforeUnloadPersist = false;
+// 本機暫存還原完成前收到的 token 更新先排隊，避免被還原的舊資料蓋掉。
+let localRestorePending = true;
+let queuedTokenUpdates = [];
+let remoteMapSaveErrorReported = false;
 
 function sanitizeStorageSegment(value) {
   return encodeURIComponent(String(value || "default").trim().slice(0, 80) || "default");
@@ -349,19 +374,36 @@ function createSnapshotMessage() {
   };
 }
 
+function writeLocalCache(key, value) {
+  // Firebase room 不從本機暫存還原，寫了只會占空間。
+  if (IS_FIREBASE_ROOM || !localStore) return;
+  localStore.set(key, value);
+}
+
 function cacheMapState(mapState) {
-  if (mapState?.mapDataUrl) writeSharedState(SHARED_MAP_STORAGE_KEY, mapState);
+  if (mapState?.mapDataUrl) writeLocalCache(SHARED_MAP_STORAGE_KEY, mapState);
 }
 
 function cacheFogState(fogState) {
-  if (fogState?.fogDataUrl) writeSharedState(SHARED_FOG_STORAGE_KEY, fogState);
+  if (fogState?.fogDataUrl) writeLocalCache(SHARED_FOG_STORAGE_KEY, fogState);
+}
+
+function reportRemoteMapSaveError(error) {
+  console.error("[MapFog Firebase]", error);
+  if (remoteMapSaveErrorReported) return;
+  remoteMapSaveErrorReported = true;
+  window.alert("地圖無法上傳到 room，玩家會看不到這張地圖。\n\n可能是圖片超過 Firebase 單筆 10MB 上限，請改用較小的圖片（例如轉成 JPG 或降低解析度）後重新上傳。");
 }
 
 function persistMapState(mapState = createMapState()) {
   if (!mapState?.mapDataUrl) return null;
 
   cacheMapState(mapState);
-  firebaseSync?.saveMapState?.(mapState);
+  try {
+    firebaseSync?.saveMapState?.(mapState)?.catch?.(reportRemoteMapSaveError);
+  } catch (error) {
+    reportRemoteMapSaveError(error);
+  }
   return mapState;
 }
 
@@ -600,6 +642,7 @@ function updateGridControls() {
   gridSettingsBtn?.setAttribute("aria-pressed", String(gridSettings.enabled));
   gridSettingsBtn.title = gridSettings.enabled ? "格線設定（已開啟）" : "格線設定";
   if (saveGridImageBtn) saveGridImageBtn.disabled = !currentImage;
+  if (saveAdjustedMapBtn) saveAdjustedMapBtn.disabled = !currentImage;
 }
 
 function setGridSettings(nextSettings, options = {}) {
@@ -633,6 +676,8 @@ function normalizeTokenState(state = {}) {
     id: typeof state.id === "string" && state.id ? state.id : createTokenId(),
     name: typeof state.name === "string" ? state.name.trim() : "",
     initiativeLabel: typeof state.initiativeLabel === "string" ? state.initiativeLabel.trim() : "",
+    initiativeEntryId: typeof state.initiativeEntryId === "string" ? state.initiativeEntryId : "",
+    hpFontSize: clamp(Math.round(Number(state.hpFontSize) || 24), 8, 96),
     imageDataUrl,
     x: Number.isFinite(Number(state.x)) ? Number(state.x) : (mapCanvas.width ? mapCanvas.width / 2 : 0),
     y: Number.isFinite(Number(state.y)) ? Number(state.y) : (mapCanvas.height ? mapCanvas.height / 2 : 0),
@@ -705,19 +750,15 @@ function preserveProtectedTokenState(nextState) {
   };
 }
 
-function readStoredTokenState() {
-  if (IS_FIREBASE_ROOM) return null;
+async function readStoredTokenState() {
+  if (IS_FIREBASE_ROOM || !localStore) return null;
 
-  try {
-    const raw = localStorage.getItem(TOKEN_STATE_STORAGE_KEY)
-      || (IS_OFFLINE_ROOM ? null : localStorage.getItem(LEGACY_TOKEN_STATE_STORAGE_KEY));
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  return await localStore.get(TOKEN_STATE_STORAGE_KEY)
+    || (IS_OFFLINE_ROOM ? null : await localStore.get(LEGACY_TOKEN_STATE_STORAGE_KEY));
 }
 
 function persistTokenState() {
-  try { localStorage.setItem(TOKEN_STATE_STORAGE_KEY, JSON.stringify(tokenCollectionState)); }
-  catch { /* live sync still works */ }
+  writeLocalCache(TOKEN_STATE_STORAGE_KEY, tokenCollectionState);
 }
 
 function getBroadcastTokenState(includeImage = true) {
@@ -777,12 +818,15 @@ function scheduleTokenControlSync(tokenId = getSelectedToken()?.id || null) {
 }
 
 function clampTokenPosition(x, y) {
-  if (!mapCanvas.width || !mapCanvas.height) return { x, y };
+  // 地圖載入前 canvas 是預設的 300×150，這時夾座標會把所有 token 擠到左上角。
+  if (!currentImage || !mapCanvas.width || !mapCanvas.height) return { x, y };
   return { x: clamp(x, 0, mapCanvas.width), y: clamp(y, 0, mapCanvas.height) };
 }
 
 function setTokenPanelOpen(open) {
   if (!tokenPanel || !tokenSettingsBtn) return;
+  // Fixed settings must escape the stage's stacking context to cover the lower controls.
+  if (open && tokenPanel.parentElement !== document.body) document.body.appendChild(tokenPanel);
   tokenPanel.hidden = !open;
   tokenSettingsBtn.setAttribute("aria-expanded", String(open));
   tokenSettingsBtn.classList.toggle("active", open || tokenCollectionState.tokens.length > 0);
@@ -801,6 +845,10 @@ function updateTokenControls() {
   }
   if (tokenSize) { tokenSize.disabled = !selected; tokenSize.value = Math.round(selected?.size ?? TOKEN_DEFAULT_SIZE); }
   if (tokenSizeValue) tokenSizeValue.textContent = `${Math.round(selected?.size ?? TOKEN_DEFAULT_SIZE)}px`;
+  const hpFontSize = document.getElementById("tokenHpFontSize");
+  if (hpFontSize) { hpFontSize.disabled = !selected; hpFontSize.value = selected?.hpFontSize ?? 24; }
+  const hpFontSizeValue = document.getElementById("tokenHpFontSizeValue");
+  if (hpFontSizeValue) hpFontSizeValue.textContent = `${selected?.hpFontSize ?? 24}px`;
   tokenSquareBtn?.classList.toggle("active", selected?.shape === "square");
   tokenHexBtn?.classList.toggle("active", selected?.shape === "hex");
   if (tokenSquareBtn) tokenSquareBtn.disabled = !selected;
@@ -837,6 +885,7 @@ function renderTokens() {
   }
   tokenLayer.querySelectorAll(".map-token").forEach((el) => { if (!visibleIds.has(el.dataset.tokenId)) el.remove(); });
   updateTokenControls();
+  document.dispatchEvent(new CustomEvent("mapfog:tokens-rendered"));
 }
 
 function setTokenCollectionState(nextState, options = {}) {
@@ -856,7 +905,7 @@ function setTokenState(nextState, options = {}) {
 
 function selectToken(tokenId) {
   if (!tokenCollectionState.tokens.some((t) => t.id === tokenId)) return;
-  setTokenCollectionState({ ...tokenCollectionState, selectedTokenId: tokenId }, { includeImage: false });
+  setTokenCollectionState({ ...tokenCollectionState, selectedTokenId: tokenId }, { includeImage: false, changedTokenId: tokenId });
 }
 
 function removeSelectedToken() {
@@ -928,6 +977,7 @@ function createInitiativeToken(entry, clientPoint = null) {
   const token = normalizeTokenState({
     name,
     initiativeLabel: label,
+    initiativeEntryId: typeof entry.id === "string" ? entry.id : "",
     imageDataUrl: canvas.toDataURL("image/png"),
     visible: true,
     x: roundCanvasValue(point.x),
@@ -937,7 +987,17 @@ function createInitiativeToken(entry, clientPoint = null) {
   return { token };
 }
 
-window.MapFogTokens = { createFromInitiative: createInitiativeToken };
+window.MapFogTokens = {
+  createFromInitiative: createInitiativeToken,
+  getState: () => tokenCollectionState,
+  linkToInitiative(tokenId, entryId, name) {
+    if (!tokenCollectionState.tokens.some((token) => token.id === tokenId)) return;
+    const tokens = tokenCollectionState.tokens.map((token) => token.id === tokenId
+      ? { ...token, initiativeEntryId: entryId, name }
+      : token);
+    setTokenCollectionState({ tokens, selectedTokenId: tokenId }, { includeImage: false, changedTokenId: tokenId });
+  }
+};
 
 function loadTokenFromFile(file) {
   if (!file) return;
@@ -983,12 +1043,12 @@ function endTokenDrag(event) {
   draggingTokenId = null; protectLocalToken(tokenId); persistTokenState(); flushTokenDragSync(tokenId);
 }
 
-function getExportFileName() {
+function getExportFileName(suffix = "grid") {
   const baseName = currentMapFileName
     .replace(/\.[^.]+$/, "")
     .replace(/[\\/:*?"<>|]+/g, "-")
     .trim() || "map";
-  return `${baseName}-grid.jpg`;
+  return `${baseName}-${suffix}.jpg`;
 }
 
 function downloadUrl(url, fileName) {
@@ -1000,7 +1060,7 @@ function downloadUrl(url, fileName) {
   link.remove();
 }
 
-function saveGridImageAsJpg() {
+function saveMapImageAsJpg(options = {}) {
   if (!currentImage || !mapCanvas.width || !mapCanvas.height) return;
 
   const exportCanvas = document.createElement("canvas");
@@ -1010,10 +1070,18 @@ function saveGridImageAsJpg() {
   const exportCtx = exportCanvas.getContext("2d");
   exportCtx.fillStyle = "#ffffff";
   exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-  exportCtx.drawImage(mapCanvas, 0, 0);
-  exportCtx.drawImage(gridCanvas, 0, 0);
+  // The CSS filter on mapCanvas is display-only, so bake the same adjustment into the export pixels.
+  try {
+    if (mapAdjust) mapAdjust.drawAdjusted(exportCtx, mapCanvas, mapCanvas.width, mapCanvas.height);
+    else exportCtx.drawImage(mapCanvas, 0, 0);
+  } catch (error) {
+    console.error("[MapFog export]", error);
+    window.alert("這個瀏覽器無法將地圖調整寫入圖片，已取消下載。");
+    return;
+  }
+  if (options.includeGrid) exportCtx.drawImage(gridCanvas, 0, 0);
 
-  const fileName = getExportFileName();
+  const fileName = getExportFileName(options.suffix);
   exportCanvas.toBlob((blob) => {
     if (!blob) {
       downloadUrl(exportCanvas.toDataURL("image/jpeg", 0.94), fileName);
@@ -1024,6 +1092,14 @@ function saveGridImageAsJpg() {
     downloadUrl(url, fileName);
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, "image/jpeg", 0.94);
+}
+
+function saveGridImageAsJpg() {
+  saveMapImageAsJpg({ includeGrid: true, suffix: "grid" });
+}
+
+function saveAdjustedMapAsJpg() {
+  saveMapImageAsJpg({ includeGrid: false, suffix: "adjusted" });
 }
 
 function readStoredControlsCollapsed() {
@@ -1101,6 +1177,15 @@ function updateOlroomCacheControls() {
   if (clearAllOlroomsBtn) {
     clearAllOlroomsBtn.title = "清除這台電腦所有 olroom 本機暫存";
   }
+
+  if (sendPlayersToRoomBtn) {
+    // room 模式的玩家在另一台電腦，房間由網址的 room 參數決定。
+    sendPlayersToRoomBtn.hidden = IS_FIREBASE_ROOM || !controlChannel;
+    sendPlayersToRoomBtn.textContent = "玩家畫面切到此房間";
+    sendPlayersToRoomBtn.title = IS_OFFLINE_ROOM
+      ? `讓這台電腦上開著的玩家畫面切換到 olroom：${OFFLINE_ROOM_ID}`
+      : "讓這台電腦上開著的玩家畫面切換到預設（無 olroom）房間";
+  }
 }
 
 async function clearCurrentOlroomCache() {
@@ -1118,6 +1203,7 @@ async function clearCurrentOlroomCache() {
     try {
       await firebaseSync.clearRoomState();
       removeLocalStorageByPrefix(STORAGE_PREFIX);
+      await localStore?.removeByPrefix(STORAGE_PREFIX);
       suppressBeforeUnloadPersist = true;
       window.location.reload();
     } catch (error) {
@@ -1132,8 +1218,12 @@ async function clearCurrentOlroomCache() {
     const confirmed = window.confirm(`清除目前 olroom「${OFFLINE_ROOM_ID}」的本機暫存？\n\n這不會刪除 Firebase，也不會影響其他 olroom。`);
     if (!confirmed) return;
 
-    removeLocalStorageByPrefix(`${OLROOM_STORAGE_PREFIX}${OFFLINE_ROOM_KEY}.`);
+    const prefix = `${OLROOM_STORAGE_PREFIX}${OFFLINE_ROOM_KEY}.`;
     suppressBeforeUnloadPersist = true;
+    removeLocalStorageByPrefix(prefix);
+    await localStore?.removeByPrefix(prefix);
+    // 開著的玩家畫面也要放下舊狀態，否則會把舊 token 寫回已清除的房間。
+    broadcastMessage({ type: "roomCacheCleared" });
     window.location.reload();
     return;
   }
@@ -1142,23 +1232,35 @@ async function clearCurrentOlroomCache() {
     const confirmed = window.confirm("清除沒有 olroom 參數時使用的預設本機暫存？\n\n這不會刪除 Firebase，也不會影響任何 olroom。");
     if (!confirmed) return;
 
-    removeLocalStorageKeys(DEFAULT_LOCAL_CACHE_KEYS);
     suppressBeforeUnloadPersist = true;
+    removeLocalStorageKeys(DEFAULT_LOCAL_CACHE_KEYS);
+    await Promise.all(DEFAULT_LOCAL_CACHE_KEYS.map((key) => localStore?.remove(key)));
+    broadcastMessage({ type: "roomCacheCleared" });
     window.location.reload();
   }
 }
 
-function clearAllOlroomCaches() {
+async function clearAllOlroomCaches() {
   const confirmed = window.confirm("清除這台電腦所有 olroom 本機暫存？\n\n這不會刪除 Firebase，也不會清除無參數單機模式的暫存。");
   if (!confirmed) return;
 
-  const removedCount = removeLocalStorageByPrefix(OLROOM_STORAGE_PREFIX);
-  if (IS_OFFLINE_ROOM && removedCount > 0) {
+  if (IS_OFFLINE_ROOM) suppressBeforeUnloadPersist = true;
+  const removedCount = removeLocalStorageByPrefix(OLROOM_STORAGE_PREFIX)
+    + (await localStore?.removeByPrefix(OLROOM_STORAGE_PREFIX) || 0);
+  controlChannel?.postMessage({ type: "olroomCachesCleared", source: "gm" });
+  if (IS_OFFLINE_ROOM) {
     window.location.reload();
     return;
   }
 
   window.alert(removedCount > 0 ? `已清除 ${removedCount} 筆 olroom 暫存。` : "目前沒有 olroom 暫存。");
+}
+
+function sendPlayersToCurrentRoom() {
+  controlChannel?.postMessage({ type: "switchRoom", source: "gm", olroom: OFFLINE_ROOM_ID });
+  if (!sendPlayersToRoomBtn) return;
+  sendPlayersToRoomBtn.textContent = "已通知玩家畫面";
+  window.setTimeout(updateOlroomCacheControls, 1500);
 }
 
 function createViewState() {
@@ -1454,16 +1556,16 @@ function loadImage(src) {
   });
 }
 
-function readStoredSnapshot() {
-  if (IS_FIREBASE_ROOM) return null;
+async function readStoredSnapshot() {
+  if (IS_FIREBASE_ROOM || !localStore) return null;
 
-  const legacySnapshot = readSharedState(SHARED_STATE_STORAGE_KEY);
-  const mapState = readSharedState(SHARED_MAP_STORAGE_KEY) || legacySnapshot;
+  const legacySnapshot = await localStore.get(SHARED_STATE_STORAGE_KEY);
+  const mapState = await localStore.get(SHARED_MAP_STORAGE_KEY) || legacySnapshot;
   if (!mapState?.mapDataUrl) return null;
 
-  const fogState = readSharedState(SHARED_FOG_STORAGE_KEY);
+  const fogState = await localStore.get(SHARED_FOG_STORAGE_KEY);
   const gridState = readSharedState(SHARED_GRID_STORAGE_KEY);
-  const tokenState = readStoredTokenState();
+  const tokenState = await readStoredTokenState();
   const fogMatchesMap = fogState?.fogDataUrl
     && Number(fogState.width) === Number(mapState.width)
     && Number(fogState.height) === Number(mapState.height);
@@ -1499,12 +1601,13 @@ async function applyRemoteSnapshot(snapshot, options = {}) {
   if (!canReuseMap) {
     currentImage = mapImage;
     currentMapDataUrl = snapshot.mapDataUrl;
+    mapAdjust?.setMapSource(snapshot.mapDataUrl);
     setCanvasSize(width, height);
     mapCtx.clearRect(0, 0, width, height);
     mapCtx.drawImage(mapImage, 0, 0, width, height);
   }
 
-  setGridSettings(snapshot.gridSettings ?? createDefaultGridSettings(), { sync: false });
+  if (!options.keepGridSettings) setGridSettings(snapshot.gridSettings ?? createDefaultGridSettings(), { sync: false });
   fogCtx.clearRect(0, 0, width, height);
 
   if (snapshot.fogDataUrl) {
@@ -1585,9 +1688,8 @@ async function applyRemoteMapState(mapState, options = {}) {
       width: mapState.width,
       height: mapState.height,
       mapDataUrl: mapState.mapDataUrl,
-      fogDataUrl: fogState?.fogDataUrl || "",
-      gridSettings
-    }, options);
+      fogDataUrl: fogState?.fogDataUrl || ""
+    }, { ...options, keepGridSettings: true });
   } finally {
     applyingRemoteMapState = false;
   }
@@ -1605,6 +1707,7 @@ function loadImageFromDataUrl(dataUrl) {
     clearPendingDraws();
     currentImage = img;
     currentMapDataUrl = dataUrl;
+    mapAdjust?.setMapSource(dataUrl);
     viewRotation = 0;
     setCanvasSize(img.naturalWidth, img.naturalHeight);
     mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
@@ -1965,26 +2068,30 @@ syncChannel?.addEventListener("message", (event) => {
   }
 
   if (message?.type === "tokenUpdate" && message.source !== "gm") {
-    setTokenCollectionState(preserveProtectedTokenState(message.tokenState), { sync: false, merge: true });
+    applyIncomingTokenState(message.tokenState, { merge: true });
   }
 });
+
+function applyIncomingTokenState(tokenState, options = {}) {
+  if (localRestorePending) {
+    queuedTokenUpdates.push({ tokenState, merge: Boolean(options.merge) });
+    return;
+  }
+  setTokenCollectionState(preserveProtectedTokenState(tokenState), { sync: false, merge: Boolean(options.merge) });
+}
+
+function flushQueuedTokenUpdates() {
+  localRestorePending = false;
+  const updates = queuedTokenUpdates;
+  queuedTokenUpdates = [];
+  for (const update of updates) applyIncomingTokenState(update.tokenState, update);
+}
 
 window.addEventListener("storage", (event) => {
   if (IS_FIREBASE_ROOM) return;
 
+  // 地圖、迷霧與 token 存在 IndexedDB，不會觸發 storage 事件；玩家的變更一律經由 BroadcastChannel 傳來。
   try {
-    if (event.key === TOKEN_STATE_STORAGE_KEY && event.newValue) {
-      setTokenCollectionState(preserveProtectedTokenState(JSON.parse(event.newValue)), { sync: false, persist: false });
-    }
-
-    if (!syncChannel && event.key === SHARED_MAP_STORAGE_KEY && event.newValue) {
-      applyRemoteMapState(JSON.parse(event.newValue), { restoreView: !currentImage }).catch((error) => console.error("[MapFog storage]", error));
-    }
-
-    if (!syncChannel && event.key === SHARED_FOG_STORAGE_KEY && event.newValue) {
-      applyRemoteFogState(JSON.parse(event.newValue)).catch((error) => console.error("[MapFog storage]", error));
-    }
-
     if (!syncChannel && event.key === SHARED_GRID_STORAGE_KEY && event.newValue) {
       setGridSettings(JSON.parse(event.newValue), { sync: false });
     }
@@ -2030,7 +2137,7 @@ function attachFirebaseSync(sync) {
   });
 
   sync.onTokenState((nextTokenState) => {
-    setTokenCollectionState(preserveProtectedTokenState(nextTokenState), { sync: false });
+    applyIncomingTokenState(nextTokenState);
   });
 }
 
@@ -2118,10 +2225,12 @@ document.addEventListener("mapfog:tablet-close-native-panels", (event) => {
   if (!document.body.classList.contains("tablet-layout")) return;
   if (event.detail?.except !== "grid") setGridPanelOpen(false);
   if (event.detail?.except !== "token") setTokenPanelOpen(false);
+  if (event.detail?.except !== "mapAdjust") mapAdjust?.setOpen(false);
 });
 
 gridSettingsBtn?.addEventListener("click", () => {
   setTokenPanelOpen(false);
+  mapAdjust?.setOpen(false);
   setGridPanelOpen(gridPanel?.hidden);
 });
 
@@ -2131,6 +2240,7 @@ gridPanelCloseBtn?.addEventListener("click", () => {
 
 tokenSettingsBtn?.addEventListener("click", () => {
   setGridPanelOpen(false);
+  mapAdjust?.setOpen(false);
   setTokenPanelOpen(tokenPanel?.hidden);
 });
 
@@ -2150,6 +2260,24 @@ tokenFileInput?.addEventListener("change", (event) => {
 });
 
 tokenSelect?.addEventListener("change", () => selectToken(tokenSelect.value));
+
+document.getElementById("tokenAddInitiativeBtn")?.addEventListener("click", () => {
+  const selected = getSelectedToken();
+  if (!selected) return;
+  setTokenPanelOpen(false);
+  document.dispatchEvent(new CustomEvent("mapfog:add-token-to-initiative", {
+    detail: { tokenId: selected.id, name: selected.name }
+  }));
+});
+
+for (const eventName of ["input", "change"]) {
+  document.getElementById("tokenHpFontSize")?.addEventListener(eventName, (event) => {
+    const tokenId = getSelectedToken()?.id || null;
+    setTokenState({ hpFontSize: Number(event.target.value) }, { sync: false, persist: false });
+    if (eventName === "change") flushTokenControlSync(tokenId);
+    else scheduleTokenControlSync(tokenId);
+  });
+}
 
 tokenSize?.addEventListener("input", () => {
   const tokenId = getSelectedToken()?.id || null;
@@ -2255,6 +2383,7 @@ gridNudgeButtons.forEach((button) => {
 });
 
 saveGridImageBtn?.addEventListener("click", saveGridImageAsJpg);
+saveAdjustedMapBtn?.addEventListener("click", saveAdjustedMapAsJpg);
 
 controlsCollapseBtn?.addEventListener("click", () => {
   const collapsed = controlsPanel?.classList.contains("collapsed");
@@ -2263,6 +2392,7 @@ controlsCollapseBtn?.addEventListener("click", () => {
 
 clearCurrentOlroomBtn?.addEventListener("click", clearCurrentOlroomCache);
 clearAllOlroomsBtn?.addEventListener("click", clearAllOlroomCaches);
+sendPlayersToRoomBtn?.addEventListener("click", sendPlayersToCurrentRoom);
 
 updateBrushLabel();
 updateModeButton();
@@ -2270,19 +2400,23 @@ updateModeNote();
 updateGridControls();
 setGridPanelOpen(false);
 updateOlroomCacheControls();
-const storedTokenState = readStoredTokenState();
-if (storedTokenState) {
-  setTokenCollectionState(storedTokenState, { sync: false, persist: false });
-} else {
-  updateTokenControls();
-}
+updateTokenControls();
 setTokenPanelOpen(false);
 whenFirebaseReady(attachFirebaseSync);
 setControlsCollapsed(readStoredControlsCollapsed());
-const storedSnapshot = readStoredSnapshot();
-if (storedSnapshot) {
-  if (storedTokenState) storedSnapshot.tokenState = storedTokenState;
-  applyRemoteSnapshot(storedSnapshot, { restoreView: true }).catch((error) => console.error("[MapFog restore]", error));
-} else {
-  applyTransform();
+applyTransform();
+
+async function restoreLocalState() {
+  const storedSnapshot = await readStoredSnapshot();
+  if (storedSnapshot) {
+    await applyRemoteSnapshot(storedSnapshot, { restoreView: true });
+    return;
+  }
+
+  const storedTokenState = await readStoredTokenState();
+  if (storedTokenState) setTokenCollectionState(storedTokenState, { sync: false, persist: false });
 }
+
+restoreLocalState()
+  .catch((error) => console.error("[MapFog restore]", error))
+  .finally(flushQueuedTokenUpdates);

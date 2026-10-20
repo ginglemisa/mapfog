@@ -3,16 +3,38 @@
   const requestedRoom = query.get("room");
   const requestedMode = query.get("sync");
   const shouldUseFirebase = Boolean(requestedRoom) || requestedMode === "firebase";
+  // 只有 room 模式才下載 SDK；單機離線時不必等 gstatic 連線逾時。
+  const FIREBASE_SDK_URLS = [
+    "https://www.gstatic.com/firebasejs/12.13.0/firebase-app-compat.js",
+    "https://www.gstatic.com/firebasejs/12.13.0/firebase-database-compat.js"
+  ];
 
   if (shouldUseFirebase) {
-    startFirebaseSync(requestedRoom || "default").catch((error) => {
-      console.error("[MapFog Firebase]", error);
+    loadFirebaseSdk()
+      .then(() => startFirebaseSync(requestedRoom || "default"))
+      .catch((error) => {
+        console.error("[MapFog Firebase]", error);
+      });
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = src;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.head.appendChild(script);
     });
+  }
+
+  async function loadFirebaseSdk() {
+    // database-compat 依賴 app-compat，必須依序載入。
+    for (const src of FIREBASE_SDK_URLS) await loadScript(src);
   }
 
   async function startFirebaseSync(rawRoomId) {
     if (!window.firebase || !window.firebase.database) {
-      throw new Error("Firebase compat SDK is not loaded. Check firebase-app-compat.js and firebase-database-compat.js script tags.");
+      throw new Error("Firebase compat SDK is not loaded. Check the network connection to www.gstatic.com.");
     }
 
     const firebaseConfig = {
@@ -77,16 +99,17 @@
 
     function listenEvent(path, callback) {
       const reference = roomPath(path);
-      const attachedAt = Date.now();
+      let isInitialValue = true;
       let lastEventId = null;
       reference.on(
         "value",
         (snapshot) => {
           const value = snapshot.val();
-          if (!value || value.sourceClientId === clientId) return;
-
-          const updatedAt = Number(value.updatedAt || 0);
-          if (updatedAt && updatedAt < attachedAt - 1000) return;
+          // 第一次回呼是掛上監聽前就存在的舊事件，不重播。不拿 updatedAt（伺服器時間）
+          // 跟本機時鐘比，避免本機時鐘偏快時把剛發生的擦霧、擲骰當成舊事件丟掉。
+          const wasInitialValue = isInitialValue;
+          isInitialValue = false;
+          if (wasInitialValue || !value || value.sourceClientId === clientId) return;
 
           const eventId = value.id || `${value.sourceClientId || "unknown"}:${value.updatedAt || ""}:${value.sequence || ""}`;
           if (eventId && eventId === lastEventId) return;
@@ -129,15 +152,15 @@
       if (Array.isArray(value.tokens)) return value;
       if (!value.tokensById || typeof value.tokensById !== "object") return value;
 
+      // 沒有圖片的節點是「別人剛刪掉、這邊又送了位置更新」留下的殘骸，不能當成 token。
+      const storedTokens = Object.values(value.tokensById).filter((token) => token?.id && token.imageDataUrl);
       const byOriginalId = new Map();
-      for (const token of Object.values(value.tokensById)) {
-        if (token?.id) byOriginalId.set(token.id, token);
-      }
+      for (const token of storedTokens) byOriginalId.set(token.id, token);
 
       const tokenOrder = Array.isArray(value.tokenOrder) ? value.tokenOrder : [];
       const orderedTokens = tokenOrder.map((id) => byOriginalId.get(id)).filter(Boolean);
       const orderedIds = new Set(orderedTokens.map((token) => token.id));
-      const rest = Object.values(value.tokensById).filter((token) => token?.id && !orderedIds.has(token.id));
+      const rest = storedTokens.filter((token) => !orderedIds.has(token.id));
 
       return {
         selectedTokenId: value.selectedTokenId || null,
@@ -247,18 +270,26 @@
         return listen("gridSettings", (value) => callback(stripMeta(value)));
       },
       sendTokenState(tokenState, includeImage = true, changedTokenId = null) {
-        if (includeImage || !changedTokenId || !Array.isArray(tokenState.tokens)) {
+        if (includeImage || !Array.isArray(tokenState.tokens)) {
           return roomPath("token").set(withMeta(toFirebaseTokenState(tokenState)));
         }
-        const changed = tokenState.tokens.find((token) => token.id === changedTokenId);
-        if (!changed) return roomPath("token").set(withMeta(toFirebaseTokenState(tokenState)));
+        // 不含圖片的狀態只能逐欄位 update；用 set() 會把所有 token 圖片一起清掉。
+        const changedTokens = changedTokenId
+          ? tokenState.tokens.filter((token) => token.id === changedTokenId)
+          : tokenState.tokens;
         const updates = {
           selectedTokenId: tokenState.selectedTokenId || null,
           tokenOrder: tokenState.tokens.map((token) => token.id).filter(Boolean),
           sourceClientId: clientId,
           updatedAt: firebase.database.ServerValue.TIMESTAMP
         };
-        for (const [key, value] of Object.entries(changed)) updates[`tokensById/${tokenKey(changed.id)}/${key}`] = value;
+        for (const changed of changedTokens) {
+          if (!changed?.id) continue;
+          for (const [key, value] of Object.entries(changed)) {
+            if (key === "imageDataUrl" || value === undefined) continue;
+            updates[`tokensById/${tokenKey(changed.id)}/${key}`] = value;
+          }
+        }
         return roomPath("token").update(updates);
       },
       clearToken() {

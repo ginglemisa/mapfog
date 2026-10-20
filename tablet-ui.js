@@ -81,6 +81,7 @@
     const buttons = {
       gridSettingsBtn: 'grid',
       tokenSettingsBtn: 'token',
+      mapAdjustBtn: 'mapAdjust',
       initiativePanelBtn: 'initiative',
       diceToggleBtn: 'dice'
     };
@@ -89,7 +90,7 @@
 
   viewport.addEventListener('pointerdown', (event) => {
     if (!isTablet()) return;
-    if (event.target.closest?.('#floatingToolbar, #toolbarToggleBtn, #tabletSettingsBtn, #gridPanel, #tokenPanel, #initiativePanel, #diceToolbar')) return;
+    if (event.target.closest?.('#floatingToolbar, #toolbarToggleBtn, #tabletSettingsBtn, #gridPanel, #tokenPanel, #mapAdjustPanel, #initiativePanel, #diceToolbar')) return;
     closeOthers();
   }, true);
 

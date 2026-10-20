@@ -48,6 +48,7 @@
   let publicState = createDefaultPublicState();
   let draggedEntryId = "";
   let draggedTokenEntryId = "";
+  let pendingTokenEntryId = "";
   let activeHpEntryId = "";
   let activePanelInteraction = null;
   let gmHintResetTimer = 0;
@@ -87,7 +88,7 @@
   }
 
   function createDefaultGmState() {
-    return { entries: [], isManualOrder: false };
+    return { entries: [], isManualOrder: false, showTokenHp: false };
   }
 
   function createDefaultPublicState() {
@@ -182,7 +183,8 @@
       : [];
     const normalized = {
       entries,
-      isManualOrder: Boolean(state.isManualOrder)
+      isManualOrder: Boolean(state.isManualOrder),
+      showTokenHp: Boolean(state.showTokenHp)
     };
 
     if (!normalized.isManualOrder) sortEntries(normalized.entries);
@@ -250,6 +252,7 @@
 
   function persistGmState() {
     writeJson(GM_STATE_STORAGE_KEY, initiativeState);
+    renderTokenHp();
   }
 
   function persistPublicState(state = publicState) {
@@ -386,6 +389,7 @@
         <div class="initiative-header-actions">
           <button id="initiativeSortBtn" class="initiative-secondary-button" type="button" title="依先攻值重新排序">排序</button>
           <button id="initiativeClearBtn" class="initiative-secondary-button danger" type="button">清空</button>
+          <button id="initiativeTokenHpBtn" class="initiative-secondary-button" type="button" aria-label="顯示 Token HP" aria-pressed="false" title="顯示 Token HP（僅 GM 可見）">HP</button>
           <button id="initiativeCloseBtn" class="initiative-icon-button" type="button" title="收起先攻管理" aria-label="收起先攻管理">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
           </button>
@@ -474,6 +478,7 @@
       list: panel.querySelector("#initiativeGmList"),
       sortButton: panel.querySelector("#initiativeSortBtn"),
       clearButton: panel.querySelector("#initiativeClearBtn"),
+      tokenHpButton: panel.querySelector("#initiativeTokenHpBtn"),
       modal,
       modalTarget: modal.querySelector("#initiativeHpModalTarget"),
       modalClose: modal.querySelector("#initiativeHpModalClose"),
@@ -488,7 +493,10 @@
     };
 
     button.addEventListener("click", () => setPanelOpen(button, panel, panel.hidden));
-    gmUi.closeButton.addEventListener("click", () => setPanelOpen(button, panel, false));
+    gmUi.closeButton.addEventListener("click", () => {
+      pendingTokenEntryId = "";
+      setPanelOpen(button, panel, false);
+    });
     attachFloatingPanelControls(panel);
     attachGmEvents(gmUi);
     return gmUi;
@@ -742,9 +750,26 @@
 
     gmUi.clearButton.addEventListener("click", () => {
       if (!initiativeState.entries.length) return;
-      initiativeState = createDefaultGmState();
+      initiativeState = { ...createDefaultGmState(), showTokenHp: initiativeState.showTokenHp };
+      pendingTokenEntryId = "";
       showGmHint("列表已清空。");
       setGmState(initiativeState);
+    });
+
+    gmUi.tokenHpButton.addEventListener("click", () => {
+      initiativeState.showTokenHp = !initiativeState.showTokenHp;
+      setGmState(initiativeState);
+    });
+    document.addEventListener("mapfog:tokens-rendered", renderTokenHp);
+    document.addEventListener("mapfog:add-token-to-initiative", (event) => {
+      const token = window.MapFogTokens?.getState().tokens.find((token) => token.id === event.detail?.tokenId);
+      if (!token) return;
+      pendingTokenEntryId = token.id;
+      gmUi.form.reset();
+      gmUi.nameInput.value = token.name;
+      if (gmUi.panel.hidden) gmUi.button.click();
+      showGmHint("填入名稱、先攻與 HP，再選擇敵／友，將此 Token 加入先攻。", 0);
+      gmUi.nameInput.focus();
     });
 
     gmUi.list.addEventListener("click", handleGmListClick);
@@ -822,12 +847,13 @@
       return;
     }
 
+    const entryId = createId();
     const nextState = normalizeGmState({
       ...initiativeState,
       entries: [
         ...initiativeState.entries,
         {
-          id: createId(),
+          id: entryId,
           name,
           initiative,
           hp,
@@ -843,6 +869,10 @@
     ui.form.reset();
     showGmHint("已新增。");
     setGmState(nextState);
+    if (pendingTokenEntryId) {
+      window.MapFogTokens?.linkToInitiative(pendingTokenEntryId, entryId, name);
+      pendingTokenEntryId = "";
+    }
     ui.nameInput.focus();
   }
 
@@ -1187,11 +1217,66 @@
     persistGmState();
   }
 
+  function getTokenInitiativeEntry(token) {
+    if (token.initiativeEntryId) return getEntryById(token.initiativeEntryId);
+    // Match older tokens only when the complete name identifies one entry.
+    const matches = initiativeState.entries.filter((entry) => entry.name === token.name);
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function renderTokenHp() {
+    if (!isGmPage) return;
+    const tokenLayer = document.getElementById("tokenLayer");
+    const tokenState = window.MapFogTokens?.getState();
+    if (!tokenLayer || !tokenState) return;
+    const selected = tokenState.tokens.find((token) => token.id === tokenState.selectedTokenId);
+    const addButton = document.getElementById("tokenAddInitiativeBtn");
+    if (addButton) {
+      const linked = selected && getTokenInitiativeEntry(selected);
+      addButton.disabled = !selected || Boolean(linked);
+      addButton.textContent = linked ? "已加入先攻" : "加入先攻";
+    }
+
+    const visibleIds = new Set();
+    const anchors = new Map(Array.from(tokenLayer.querySelectorAll(".token-hp-anchor"))
+      .map((anchor) => [anchor.dataset.hpTokenId, anchor]));
+    for (const token of tokenState.tokens) {
+      const entry = getTokenInitiativeEntry(token);
+      if (!initiativeState.showTokenHp || !entry || !token.visible || !token.imageDataUrl) continue;
+      visibleIds.add(token.id);
+      let anchor = anchors.get(token.id);
+      if (!anchor) {
+        anchor = document.createElement("span");
+        anchor.className = "token-hp-anchor";
+        anchor.dataset.hpTokenId = token.id;
+        const label = document.createElement("span");
+        label.className = "token-hp-label";
+        anchor.appendChild(label);
+        tokenLayer.appendChild(anchor);
+      }
+      anchor.classList.toggle("enemy", entry.side === "enemy");
+      anchor.classList.toggle("selected", token.id === tokenState.selectedTokenId);
+      anchor.style.transform = `translate(${token.x}px, ${token.y}px) rotate(var(--token-rotation, 0deg))`;
+      const label = anchor.firstElementChild;
+      label.textContent = String(getHpNumber(entry.hp));
+      label.style.fontSize = `${token.hpFontSize || 24}px`;
+      label.style.bottom = `${token.size / 2 + 4}px`;
+      label.setAttribute("aria-label", `${entry.name} HP ${getHpNumber(entry.hp)}`);
+    }
+    tokenLayer.querySelectorAll(".token-hp-anchor").forEach((anchor) => {
+      if (!visibleIds.has(anchor.dataset.hpTokenId)) anchor.remove();
+    });
+  }
+
   function renderGmList() {
     if (!isGmPage || !ui?.list) return;
 
     ui.count.textContent = `${initiativeState.entries.length} 位`;
     ui.sortButton.classList.toggle("active", !initiativeState.isManualOrder && initiativeState.entries.length > 1);
+    ui.tokenHpButton.classList.toggle("active", initiativeState.showTokenHp);
+    ui.tokenHpButton.setAttribute("aria-pressed", String(initiativeState.showTokenHp));
+    ui.tokenHpButton.title = `${initiativeState.showTokenHp ? "隱藏" : "顯示"} Token HP（僅 GM 可見）`;
+    renderTokenHp();
     ui.list.replaceChildren();
 
     if (!initiativeState.entries.length) {
@@ -1321,6 +1406,32 @@
     const style = document.createElement("style");
     style.id = "mapfogInitiativeStyles";
     style.textContent = `
+      .token-hp-anchor {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 0;
+        height: 0;
+        transform-origin: 0 0;
+        pointer-events: none;
+        z-index: 0;
+      }
+      .token-hp-anchor.selected { z-index: 2; }
+      .token-hp-label {
+        position: absolute;
+        left: 0;
+        transform: translateX(-50%);
+        color: #4ade80;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-weight: 800;
+        line-height: 1.15;
+        white-space: nowrap;
+        text-shadow: -1px -1px 2px #020617, 1px 1px 2px #020617, 0 0 4px #020617;
+      }
+      .token-hp-anchor.enemy .token-hp-label { color: #f87171; }
+      .gm-page .token-panel { z-index: 36; overflow-y: auto; }
+      .gm-page .token-panel > * { flex-shrink: 0; }
+      .token-hp-help { color: #cbd5e1; font-size: 12px; }
       .mapfog-initiative-panel {
         position: absolute;
         box-sizing: border-box;

@@ -1,4 +1,5 @@
 const DEFAULT_SYNC_CHANNEL_NAME = "mapfog.sync.v1";
+const CONTROL_CHANNEL_NAME = "mapfog.control.v1";
 const DEFAULT_SHARED_STATE_STORAGE_KEY = "mapfog.shared.state";
 const DEFAULT_SHARED_MAP_STORAGE_KEY = "mapfog.shared.map.v1";
 const DEFAULT_SHARED_FOG_STORAGE_KEY = "mapfog.shared.fog.v1";
@@ -32,6 +33,7 @@ const fogCtx = fogCanvas.getContext("2d");
 const DEFAULT_TOKEN_STATE_STORAGE_KEY = "mapfog.tokens.state.v2";
 const LEGACY_TOKEN_STATE_STORAGE_KEY = "mapfog.token.state";
 const DEFAULT_PLAYER_VIEW_STATE_STORAGE_KEY = "mapfog.view.player.v1";
+const DEFAULT_PLAYER_MAP_ADJUST_STORAGE_KEY = "mapfog.mapAdjust.player.v1";
 const OLROOM_STORAGE_PREFIX = "mapfog.olroom.";
 const TOKEN_DEFAULT_SIZE = 96;
 const TOKEN_MIN_SIZE = 16;
@@ -60,7 +62,18 @@ const SHARED_FOG_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}f
 const SHARED_GRID_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}grid.v1` : DEFAULT_SHARED_GRID_STORAGE_KEY;
 const TOKEN_STATE_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}tokens.v2` : DEFAULT_TOKEN_STATE_STORAGE_KEY;
 const PLAYER_VIEW_STATE_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}playerView.v1` : DEFAULT_PLAYER_VIEW_STATE_STORAGE_KEY;
-const syncChannel = "BroadcastChannel" in window ? new BroadcastChannel(SYNC_CHANNEL_NAME) : null;
+const PLAYER_MAP_ADJUST_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}playerMapAdjust.v1` : DEFAULT_PLAYER_MAP_ADJUST_STORAGE_KEY;
+// Firebase room 已經同步一切；同機再走 BroadcastChannel 會讓柔邊擦霧被套用兩次。
+const syncChannel = !IS_FIREBASE_ROOM && "BroadcastChannel" in window ? new BroadcastChannel(SYNC_CHANNEL_NAME) : null;
+// GM 的跨房間控制訊息：切換玩家房間、清除所有 olroom 暫存。
+const controlChannel = !IS_FIREBASE_ROOM && "BroadcastChannel" in window ? new BroadcastChannel(CONTROL_CHANNEL_NAME) : null;
+const localStore = window.MapFogLocalStore;
+// 地圖調整只存在這個玩家的瀏覽器，不會同步給 GM 或其他玩家。
+const mapAdjust = window.MapFogMapAdjust?.create({
+  canvas: mapCanvas,
+  storageKey: PLAYER_MAP_ADJUST_STORAGE_KEY,
+  onOpen: () => setTokenPanelOpen(false)
+}) ?? null;
 
 let hasMap = false;
 let scale = 1;
@@ -92,6 +105,10 @@ let pendingRemoteFogState = null;
 let pendingFirebaseFogHistory = null;
 let applyingRemoteMapState = false;
 let firebaseFogHistoryApplySeq = 0;
+let suppressBeforeUnloadPersist = false;
+// 本機暫存還原完成前收到的 token 更新先排隊，避免被還原的舊資料蓋掉。
+let localRestorePending = true;
+let queuedTokenUpdates = [];
 
 function sanitizeStorageSegment(value) {
   return encodeURIComponent(String(value || "default").trim().slice(0, 80) || "default");
@@ -138,12 +155,18 @@ function readSharedState(key) {
   }
 }
 
+function writeLocalCache(key, value) {
+  // Firebase room 不從本機暫存還原，寫了只會占空間。
+  if (IS_FIREBASE_ROOM || !localStore) return;
+  localStore.set(key, value);
+}
+
 function cacheMapState(mapState) {
-  if (mapState?.mapDataUrl) writeSharedState(SHARED_MAP_STORAGE_KEY, mapState);
+  if (mapState?.mapDataUrl) writeLocalCache(SHARED_MAP_STORAGE_KEY, mapState);
 }
 
 function cacheFogState(fogState) {
-  if (fogState?.fogDataUrl) writeSharedState(SHARED_FOG_STORAGE_KEY, fogState);
+  if (fogState?.fogDataUrl) writeLocalCache(SHARED_FOG_STORAGE_KEY, fogState);
 }
 
 function cacheGridSettings() {
@@ -312,6 +335,8 @@ function normalizeTokenState(state = {}) {
     id: typeof state.id === "string" && state.id ? state.id : createTokenId(),
     name: typeof state.name === "string" ? state.name.trim() : "",
     initiativeLabel: typeof state.initiativeLabel === "string" ? state.initiativeLabel.trim() : "",
+    initiativeEntryId: typeof state.initiativeEntryId === "string" ? state.initiativeEntryId : "",
+    hpFontSize: clamp(Math.round(Number(state.hpFontSize) || 24), 8, 96),
     imageDataUrl,
     x: Number.isFinite(Number(state.x)) ? Number(state.x) : (mapCanvas.width ? mapCanvas.width / 2 : 0),
     y: Number.isFinite(Number(state.y)) ? Number(state.y) : (mapCanvas.height ? mapCanvas.height / 2 : 0),
@@ -384,19 +409,15 @@ function preserveProtectedTokenState(nextState) {
   };
 }
 
-function readStoredTokenState() {
-  if (IS_FIREBASE_ROOM) return null;
+async function readStoredTokenState() {
+  if (IS_FIREBASE_ROOM || !localStore) return null;
 
-  try {
-    const raw = localStorage.getItem(TOKEN_STATE_STORAGE_KEY)
-      || (IS_OFFLINE_ROOM ? null : localStorage.getItem(LEGACY_TOKEN_STATE_STORAGE_KEY));
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  return await localStore.get(TOKEN_STATE_STORAGE_KEY)
+    || (IS_OFFLINE_ROOM ? null : await localStore.get(LEGACY_TOKEN_STATE_STORAGE_KEY));
 }
 
 function persistTokenState() {
-  try { localStorage.setItem(TOKEN_STATE_STORAGE_KEY, JSON.stringify(tokenCollectionState)); }
-  catch { /* live sync still works */ }
+  writeLocalCache(TOKEN_STATE_STORAGE_KEY, tokenCollectionState);
 }
 
 function getBroadcastTokenState(includeImage = true) {
@@ -456,7 +477,8 @@ function scheduleTokenControlSync(tokenId = getSelectedToken()?.id || null) {
 }
 
 function clampTokenPosition(x, y) {
-  if (!mapCanvas.width || !mapCanvas.height) return { x, y };
+  // 地圖載入前 canvas 是預設的 300×150，這時夾座標會把所有 token 擠到左上角。
+  if (!hasMap || !mapCanvas.width || !mapCanvas.height) return { x, y };
   return { x: clamp(x, 0, mapCanvas.width), y: clamp(y, 0, mapCanvas.height) };
 }
 
@@ -543,7 +565,7 @@ function setTokenState(nextState, options = {}) {
 
 function selectToken(tokenId) {
   if (!tokenCollectionState.tokens.some((t) => t.id === tokenId)) return;
-  setTokenCollectionState({ ...tokenCollectionState, selectedTokenId: tokenId }, { includeImage: false });
+  setTokenCollectionState({ ...tokenCollectionState, selectedTokenId: tokenId }, { includeImage: false, changedTokenId: tokenId });
 }
 
 function removeSelectedToken() {
@@ -833,9 +855,10 @@ async function applySnapshot(snapshot, options = {}) {
     mapCtx.clearRect(0, 0, width, height);
     mapCtx.drawImage(mapImage, 0, 0, width, height);
     currentMapDataUrl = snapshot.mapDataUrl;
+    mapAdjust?.setMapSource(snapshot.mapDataUrl);
   }
 
-  setGridSettings(snapshot.gridSettings ?? createDefaultGridSettings());
+  if (!options.keepGridSettings) setGridSettings(snapshot.gridSettings ?? createDefaultGridSettings());
   fogCtx.clearRect(0, 0, width, height);
 
   if (snapshot.fogDataUrl) {
@@ -850,7 +873,8 @@ async function applySnapshot(snapshot, options = {}) {
   canvasHolder.hidden = false;
 
   if (snapshot.tokenState) {
-    setTokenCollectionState(preserveProtectedTokenState(snapshot.tokenState), { sync: false });
+    // 收到的狀態不寫回本機暫存：GM 會自己保存，玩家寫回只會讓舊資料蓋掉 GM。
+    setTokenCollectionState(preserveProtectedTokenState(snapshot.tokenState), { sync: false, persist: false });
   } else {
     renderTokens();
   }
@@ -913,9 +937,8 @@ async function applyRemoteMapState(mapState, options = {}) {
       width: mapState.width,
       height: mapState.height,
       mapDataUrl: mapState.mapDataUrl,
-      fogDataUrl: fogState?.fogDataUrl || "",
-      gridSettings
-    }, options);
+      fogDataUrl: fogState?.fogDataUrl || ""
+    }, { ...options, keepGridSettings: true });
   } finally {
     applyingRemoteMapState = false;
   }
@@ -1112,16 +1135,16 @@ function touchMidpoint(t1, t2) {
   };
 }
 
-function readStoredSnapshot() {
-  if (IS_FIREBASE_ROOM) return null;
+async function readStoredSnapshot() {
+  if (IS_FIREBASE_ROOM || !localStore) return null;
 
-  const legacySnapshot = readSharedState(SHARED_STATE_STORAGE_KEY);
-  const mapState = readSharedState(SHARED_MAP_STORAGE_KEY) || legacySnapshot;
+  const legacySnapshot = await localStore.get(SHARED_STATE_STORAGE_KEY);
+  const mapState = await localStore.get(SHARED_MAP_STORAGE_KEY) || legacySnapshot;
   if (!mapState?.mapDataUrl) return null;
 
-  const fogState = readSharedState(SHARED_FOG_STORAGE_KEY);
+  const fogState = await localStore.get(SHARED_FOG_STORAGE_KEY);
   const gridState = readSharedState(SHARED_GRID_STORAGE_KEY);
-  const tokenState = readStoredTokenState();
+  const tokenState = await readStoredTokenState();
   const fogMatchesMap = fogState?.fogDataUrl
     && Number(fogState.width) === Number(mapState.width)
     && Number(fogState.height) === Number(mapState.height);
@@ -1155,26 +1178,55 @@ syncChannel?.addEventListener("message", (event) => {
     cacheCurrentFogState();
   }
   if (message.type === "gridUpdate") setGridSettings(message.gridSettings);
-  if (message.type === "tokenUpdate") setTokenCollectionState(preserveProtectedTokenState(message.tokenState), { sync: false, merge: true });
+  if (message.type === "tokenUpdate") applyIncomingTokenState(message.tokenState, { merge: true });
+  if (message.type === "roomCacheCleared") reloadWithoutPersist();
 });
 
+controlChannel?.addEventListener("message", (event) => {
+  const message = event.data;
+  if (!message || message.source !== "gm") return;
+
+  if (message.type === "switchRoom") switchToOfflineRoom(message.olroom);
+  if (message.type === "olroomCachesCleared" && IS_OFFLINE_ROOM) reloadWithoutPersist();
+});
+
+function reloadWithoutPersist() {
+  suppressBeforeUnloadPersist = true;
+  window.location.reload();
+}
+
+function switchToOfflineRoom(olroom) {
+  const nextRoom = typeof olroom === "string" ? olroom : "";
+  if (nextRoom === OFFLINE_ROOM_ID) return;
+
+  const url = new URL(window.location.href);
+  if (nextRoom) url.searchParams.set("olroom", nextRoom);
+  else url.searchParams.delete("olroom");
+  window.location.href = url.toString();
+}
+
+function applyIncomingTokenState(tokenState, options = {}) {
+  if (localRestorePending) {
+    queuedTokenUpdates.push({ tokenState, merge: Boolean(options.merge) });
+    return;
+  }
+  // 收到的狀態不寫回本機暫存：GM 會自己保存，玩家寫回只會讓舊資料蓋掉 GM。
+  setTokenCollectionState(preserveProtectedTokenState(tokenState), { sync: false, persist: false, merge: Boolean(options.merge) });
+}
+
+function flushQueuedTokenUpdates() {
+  localRestorePending = false;
+  const updates = queuedTokenUpdates;
+  queuedTokenUpdates = [];
+  for (const update of updates) applyIncomingTokenState(update.tokenState, update);
+}
+
+// 地圖、迷霧與 token 存在 IndexedDB，不會觸發 storage 事件；只有格線還能走 localStorage 備援。
 if (!syncChannel) {
   window.addEventListener("storage", (event) => {
     if (IS_FIREBASE_ROOM) return;
 
     try {
-      if (event.key === SHARED_STATE_STORAGE_KEY && event.newValue) {
-        applySnapshot(JSON.parse(event.newValue));
-      }
-
-      if (event.key === SHARED_MAP_STORAGE_KEY && event.newValue) {
-        applyRemoteMapState(JSON.parse(event.newValue), { restoreView: !hasMap }).catch((error) => console.error("[MapFog storage]", error));
-      }
-
-      if (event.key === SHARED_FOG_STORAGE_KEY && event.newValue) {
-        applyRemoteFogState(JSON.parse(event.newValue)).catch((error) => console.error("[MapFog storage]", error));
-      }
-
       if (event.key === SHARED_GRID_STORAGE_KEY && event.newValue) {
         setGridSettings(JSON.parse(event.newValue), { cache: false });
       }
@@ -1183,17 +1235,6 @@ if (!syncChannel) {
     }
   });
 }
-
-window.addEventListener("storage", (event) => {
-  if (IS_FIREBASE_ROOM) return;
-  if (event.key !== TOKEN_STATE_STORAGE_KEY || !event.newValue) return;
-
-  try {
-    setTokenCollectionState(preserveProtectedTokenState(JSON.parse(event.newValue)), { sync: false, persist: false });
-  } catch {
-    // Ignore malformed token fallback state.
-  }
-});
 
 function attachFirebaseSync(sync) {
   firebaseSync = sync;
@@ -1231,7 +1272,7 @@ function attachFirebaseSync(sync) {
   });
 
   sync.onTokenState((nextTokenState) => {
-    setTokenCollectionState(preserveProtectedTokenState(nextTokenState), { sync: false });
+    applyIncomingTokenState(nextTokenState);
   });
 }
 
@@ -1244,6 +1285,7 @@ toolbarToggleBtn?.addEventListener("click", () => {
 });
 
 tokenSettingsBtn?.addEventListener("click", () => {
+  mapAdjust?.setOpen(false);
   setTokenPanelOpen(tokenPanel?.hidden);
 });
 
@@ -1360,23 +1402,30 @@ window.addEventListener("resize", () => {
 });
 
 window.addEventListener("beforeunload", () => {
-  if (!hasMap) return;
-  persistTokenState();
+  // token 不在這裡保存：玩家關頁時的狀態可能比 GM 舊，寫回會蓋掉 GM 的 token 位置。
+  if (!hasMap || suppressBeforeUnloadPersist) return;
   persistViewState();
 });
 
-const storedTokenState = readStoredTokenState();
-if (storedTokenState) {
-  setTokenCollectionState(storedTokenState, { sync: false, persist: false });
-} else {
-  updateTokenControls();
-}
+updateTokenControls();
 setTokenPanelOpen(false);
 whenFirebaseReady(attachFirebaseSync);
 
-const storedSnapshot = readStoredSnapshot();
-if (storedSnapshot) {
-  if (storedTokenState) storedSnapshot.tokenState = storedTokenState;
-  applySnapshot(storedSnapshot, { restoreView: true }).catch((error) => console.error("[MapFog restore]", error));
+async function restoreLocalState() {
+  const storedSnapshot = await readStoredSnapshot();
+  if (storedSnapshot) {
+    await applySnapshot(storedSnapshot, { restoreView: true });
+    return;
+  }
+
+  const storedTokenState = await readStoredTokenState();
+  if (storedTokenState) setTokenCollectionState(storedTokenState, { sync: false, persist: false });
 }
-syncChannel?.postMessage({ type: "requestSnapshot", source: "player" });
+
+// 先顯示本機暫存，再向 GM 要最新狀態，讓 GM 的回覆一定蓋在暫存之上。
+restoreLocalState()
+  .catch((error) => console.error("[MapFog restore]", error))
+  .finally(() => {
+    flushQueuedTokenUpdates();
+    syncChannel?.postMessage({ type: "requestSnapshot", source: "player" });
+  });
