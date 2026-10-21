@@ -1,6 +1,6 @@
 // 讓網頁在斷網時也能重新整理：有網路一律抓最新版本，抓不到才用上次存下的檔案。
 // 只有 https 或 127.0.0.1／localhost 網址能使用；http 區網位址的瀏覽器不會啟用這個檔案。
-const CACHE_NAME = "mapfog-shell-v2";
+const CACHE_NAME = "mapfog-shell-v3";
 // 新增網頁會用到的檔案時，也要加進這份清單，第一次開啟就先存好。
 const SHELL_FILES = [
   "./",
@@ -10,6 +10,7 @@ const SHELL_FILES = [
   "toolbar-ui.css",
   "map-adjust.css",
   "tablet-ui.css",
+  "player-qr.css",
   "firebase-sync.js",
   "connection-status.js",
   "local-store.js",
@@ -21,7 +22,10 @@ const SHELL_FILES = [
   "player.js",
   "initiative-sync.js",
   "tablet-ui.js",
-  "panel-layout.js"
+  "panel-layout.js",
+  "player-qr.js",
+  "vendor/qrcode.min.js",
+  "vendor/qrcode-LICENSE.txt"
 ];
 const FIREBASE_SDK_FILES = [
   "https://www.gstatic.com/firebasejs/12.13.0/firebase-app-compat.js",

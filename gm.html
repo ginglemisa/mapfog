@@ -707,6 +707,7 @@
   <link rel="stylesheet" href="toolbar-ui.css?v=20261021-side-toolbar">
   <link rel="stylesheet" href="map-adjust.css?v=20261021-left-panels">
   <link rel="stylesheet" href="tablet-ui.css?v=20261021-tablet-initiative-drag">
+  <link rel="stylesheet" href="player-qr.css?v=20261021-player-qr">
 </head>
 <body class="gm-page">
   <div class="wrap">
@@ -774,6 +775,10 @@
 
           <button id="mapSettingsBtn" class="tool-button" type="button" title="地圖設定" aria-label="地圖設定" aria-controls="controlsPanel" aria-expanded="false">
             <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="M21 16l-5-5-9 8"/></svg>
+          </button>
+
+          <button id="playerQrBtn" class="tool-button" type="button" title="玩家 QR Code" aria-label="顯示玩家 QR Code" aria-haspopup="dialog" aria-controls="playerQrDialog">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3z M20 14v3 M14 20h7 M20 17v4"/></svg>
           </button>
 
           <button id="gridSettingsBtn" class="tool-button" type="button" title="格線設定" aria-label="格線設定" aria-controls="gridPanel" aria-expanded="false">
@@ -1000,6 +1005,19 @@
     <div class="map-adjust-note">只影響這台裝置的地圖底圖顯示，不會同步給玩家。</div>
   </div>
 
+  <dialog id="playerQrDialog" class="player-qr-dialog" aria-labelledby="playerQrTitle">
+    <h2 id="playerQrTitle">玩家加入房間</h2>
+    <p class="player-qr-room">目前房間：<strong id="playerQrRoom"></strong></p>
+    <div id="playerQrCode" class="player-qr-code" role="img" aria-label="玩家房間 QR Code"></div>
+    <label for="playerQrUrl">玩家網址</label>
+    <input id="playerQrUrl" class="player-qr-url" type="url" readonly>
+    <div class="player-qr-actions">
+      <button id="copyPlayerQrUrl" class="player-qr-copy" type="button">複製玩家網址</button>
+      <button id="closePlayerQr" type="button">關閉</button>
+    </div>
+    <p id="playerQrStatus" class="player-qr-status" role="status" aria-live="polite"></p>
+  </dialog>
+
   <script src="firebase-sync.js"></script>
   <script src="connection-status.js?v=20261021-side-toolbar"></script>
   <script src="local-store.js"></script>
@@ -1011,6 +1029,8 @@
   <script src="initiative-sync.js?v=20261021-tablet-initiative-drag"></script>
   <script src="tablet-ui.js?v=20261021-left-panels"></script>
   <script src="panel-layout.js?v=20261021-left-panels"></script>
+  <script src="vendor/qrcode.min.js?v=1.0.0"></script>
+  <script src="player-qr.js?v=20261021-player-qr"></script>
   <script>
     // 讓網頁斷網時也能重新整理（只在 https 或 127.0.0.1 等網址有效，http 區網位址會自動略過）。
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch((error) => console.warn("[MapFog 離線]", error));
