@@ -161,6 +161,8 @@
     const observer = new MutationObserver((records) => {
       for (const record of records) {
         const panel = record.target;
+        // 先攻面板只當成要避開的區域，位置由它自己決定（拖曳過的位置也存在它的 inline style）。
+        if (!panels.includes(panel)) continue;
         openOrder = openOrder.filter((item) => item !== panel);
         if (!panel.hidden) openOrder.push(panel);
         else clearInlinePosition(panel);
