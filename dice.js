@@ -3,7 +3,9 @@
   const QUICK_DICE_SIDES = [20, 12, 10, 8, 6, 4];
   const HISTORY_LIMIT = 20;
   const AUTO_HIDE_MS = 8000;
-  // 擲骰訊息跟地圖同步一樣按 room／olroom 分開，不會跑到其他房間的畫面。
+  // 網址同時帶多種房間參數時整頁停止同步（見 sync-mode.js）。
+  if (window.MapFogSyncMode?.blocked) return;
+  // 擲骰訊息跟地圖同步一樣按 room／lanroom／olroom 分開，不會跑到其他房間的畫面。
   const ROOM_SUFFIX = getRoomSuffix();
   const CHANNEL_NAME = `mapfog.sync.v1${ROOM_SUFFIX}`;
   const ROLL_STORAGE_KEY = `mapfog.dice.roll${ROOM_SUFFIX}`;
@@ -57,10 +59,11 @@
 
   function getRoomSuffix() {
     const query = new URLSearchParams(window.location.search);
-    const room = query.get("room") || (query.get("sync") === "firebase" ? "default" : "");
+    const mode = window.MapFogSyncMode?.mode;
     const encode = (value) => encodeURIComponent(String(value).trim().slice(0, 80) || "default");
-    if (room) return `.room.${encode(room)}`;
-    const olroom = query.get("olroom");
+    if (mode === "firebase") return `.room.${encode(query.get("room") || "default")}`;
+    if (mode === "lan") return `.lanroom.${encode(query.get("lanroom"))}`;
+    const olroom = mode === "olroom" ? query.get("olroom") : "";
     return olroom ? `.olroom.${encode(olroom)}` : "";
   }
 
@@ -504,12 +507,13 @@
       }
     };
 
-    if (window.MapFogFirebaseSync) {
-      attach(window.MapFogFirebaseSync);
+    // Firebase 與 LAN 同步服務的 API 相同。
+    if (window.MapFogSync) {
+      attach(window.MapFogSync);
       return;
     }
 
-    window.addEventListener("mapfog:firebase-ready", (event) => attach(event.detail), { once: true });
+    window.addEventListener("mapfog:sync-ready", (event) => attach(event.detail), { once: true });
   }
 
   function addDie(sides) {

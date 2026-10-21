@@ -1,6 +1,6 @@
 // 讓網頁在斷網時也能重新整理：有網路一律抓最新版本，抓不到才用上次存下的檔案。
 // 只有 https 或 127.0.0.1／localhost 網址能使用；http 區網位址的瀏覽器不會啟用這個檔案。
-const CACHE_NAME = "mapfog-shell-v3";
+const CACHE_NAME = "mapfog-shell-v4";
 // 新增網頁會用到的檔案時，也要加進這份清單，第一次開啟就先存好。
 const SHELL_FILES = [
   "./",
@@ -11,7 +11,9 @@ const SHELL_FILES = [
   "map-adjust.css",
   "tablet-ui.css",
   "player-qr.css",
+  "sync-mode.js",
   "firebase-sync.js",
+  "lan-sync.js",
   "connection-status.js",
   "local-store.js",
   "image-store.js",
@@ -32,13 +34,24 @@ const FIREBASE_SDK_FILES = [
   "https://www.gstatic.com/firebasejs/12.13.0/firebase-database-compat.js"
 ];
 
+// 由 MapFog LAN 伺服器提供網頁時，這個網址會回應；LAN 模式不使用 Firebase，也不向外部網站下載任何東西。
+async function isServedByLanServer() {
+  try {
+    const response = await fetch("lan-api/info", { cache: "no-store" });
+    return response.ok && (await response.json())?.app === "mapfog-lan";
+  } catch {
+    return false;
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
+    const sdkFiles = await isServedByLanServer() ? [] : FIREBASE_SDK_FILES;
     // 逐一存檔，某個檔案失敗不影響其他檔案。
     await Promise.all([
       ...SHELL_FILES.map((file) => cache.add(new Request(file, { cache: "no-cache" })).catch(() => null)),
-      ...FIREBASE_SDK_FILES.map((url) => fetch(url, { mode: "no-cors" })
+      ...sdkFiles.map((url) => fetch(url, { mode: "no-cors" })
         .then((response) => cache.put(url, response))
         .catch(() => null))
     ]);
@@ -62,6 +75,8 @@ self.addEventListener("fetch", (event) => {
   const firebaseSdk = url.origin === "https://www.gstatic.com" && url.pathname.startsWith("/firebasejs/");
   // Firebase 資料庫的連線不經過這裡，照常直接連線。
   if (!sameOrigin && !firebaseSdk) return;
+  // LAN 伺服器的即時資料與圖片下載直接連線，不存進離線快取。
+  if (sameOrigin && url.pathname.includes("/lan-api/")) return;
   event.respondWith(networkFirst(request, sameOrigin));
 });
 

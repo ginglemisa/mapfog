@@ -88,13 +88,142 @@
         grid-template-columns: 1fr;
       }
     }
+    /* GM 模式選擇：快速使用、olroom、room、lanroom。 */
+    .mode-dialog {
+      width: min(520px, calc(100vw - 32px));
+      max-height: calc(100dvh - 32px);
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      color: var(--text);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+    }
+    .mode-dialog::backdrop {
+      background: rgba(0, 0, 0, 0.7);
+    }
+    .mode-dialog-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .mode-dialog h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+    .mode-list {
+      display: grid;
+      gap: 10px;
+    }
+    .mode-option {
+      display: grid;
+      gap: 8px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(8, 12, 18, 0.6);
+    }
+    .mode-option:focus-within {
+      border-color: var(--accent);
+    }
+    .mode-option-title {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 4px 8px;
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .mode-option-title code {
+      color: #bae6fd;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .mode-option-desc {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .mode-option-row {
+      display: flex;
+      gap: 8px;
+    }
+    .mode-option input {
+      flex: 1;
+      min-width: 0;
+      min-height: 40px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0b1220;
+      color: var(--text);
+      font: inherit;
+      font-size: 15px;
+    }
+    .mode-option input:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 0;
+    }
+    .mode-option input[aria-invalid="true"] {
+      border-color: #f87171;
+    }
+    .mode-button {
+      min-height: 40px;
+      padding: 8px 16px;
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      background: var(--accent);
+      color: #082f49;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .mode-button:hover {
+      background: #7dd3fc;
+    }
+    .mode-close {
+      min-height: 32px;
+      padding: 4px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font: inherit;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .mode-close:hover {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+    .mode-error,
+    .mode-warning {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .mode-error {
+      color: #fca5a5;
+    }
+    .mode-warning {
+      color: #fbbf24;
+    }
+    .mode-error:empty,
+    .mode-warning:empty {
+      display: none;
+    }
   </style>
 </head>
 <body>
   <main>
     <h1>MapFog</h1>
     <nav aria-label="入口">
-      <a href="gm.html">GM 控制台</a>
+      <a id="gmEntryLink" href="gm.html" aria-haspopup="dialog" aria-controls="gmModeDialog">GM 控制台</a>
       <a href="pl.html">玩家畫面</a>
     </nav>
     <section class="quick-help" aria-labelledby="quickHelpTitle">
@@ -102,7 +231,168 @@
       <p><strong>GM：</strong>上傳地圖後即可擦除／補回迷霧，也可設定格線、Token、先攻與擲骰。</p>
       <p><strong>玩家：</strong>開啟玩家畫面即可查看同步內容，並可移動 Token、擲骰。</p>
       <p><strong>跨裝置：</strong>GM 與玩家網址加上相同的 <code>?room=房間名</code>。房間名限 <strong>8–10 個字元</strong>，只能使用英文字母、數字與連字號 <code>-</code>。例如 <code>gm.html?room=mygame01</code> 與 <code>pl.html?room=mygame01</code>。</p>
+      <p><strong>沒有網路（區域網路）：</strong>GM 筆電執行 <code>start-lan-server.bat</code>，用 <code>gm.html?lanroom=房間名</code> 開啟；玩家連同一個 Wi-Fi 或手機熱點，掃 GM 畫面的「玩家 QR Code」加入。詳見 README 的「LAN 模式」。</p>
     </section>
   </main>
+
+  <dialog id="gmModeDialog" class="mode-dialog" aria-labelledby="gmModeTitle">
+    <div class="mode-dialog-header">
+      <h2 id="gmModeTitle">選擇 GM 模式</h2>
+      <button class="mode-close" type="button" data-close>關閉</button>
+    </div>
+    <div class="mode-list">
+      <form class="mode-option" data-mode="quick">
+        <div class="mode-option-title">快速使用</div>
+        <p class="mode-option-desc">直接開啟 GM 控制台，不分房間，資料只存在這台電腦。適合同一台電腦外接螢幕給玩家看。</p>
+        <div class="mode-option-row">
+          <button class="mode-button" type="submit">開啟 GM 控制台</button>
+        </div>
+      </form>
+
+      <form class="mode-option" data-mode="olroom" novalidate>
+        <label class="mode-option-title" for="olroomInput">單機分房 <code>olroom</code></label>
+        <p class="mode-option-desc">同一台電腦、同一個瀏覽器，各房間分開暫存（例如每張地圖一個房間）。不需要網路。</p>
+        <div class="mode-option-row">
+          <input id="olroomInput" name="room" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="房間名稱，例如 dungeon1" aria-describedby="olroomError">
+          <button class="mode-button" type="submit">開啟</button>
+        </div>
+        <p id="olroomError" class="mode-error" role="alert"></p>
+      </form>
+
+      <form class="mode-option" data-mode="room" novalidate>
+        <label class="mode-option-title" for="roomInput">跨裝置（網路）<code>room</code></label>
+        <p class="mode-option-desc">GM 與玩家用不同裝置，透過網際網路同步。房間名稱 8–10 個字元，只能用英文字母、數字與 <code>-</code>。</p>
+        <div class="mode-option-row">
+          <input id="roomInput" name="room" type="text" maxlength="10" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="例如 mygame01" aria-describedby="roomError">
+          <button class="mode-button" type="submit">開啟</button>
+        </div>
+        <p id="roomError" class="mode-error" role="alert"></p>
+      </form>
+
+      <form class="mode-option" data-mode="lanroom" novalidate>
+        <label class="mode-option-title" for="lanroomInput">區域網路 <code>lanroom</code></label>
+        <p class="mode-option-desc">同一個 Wi-Fi 或手機熱點，不需要網際網路；GM 筆電要先執行 <code>start-lan-server.bat</code>。房間名稱可用英文字母、數字、<code>-</code>、<code>_</code>。</p>
+        <div class="mode-option-row">
+          <input id="lanroomInput" name="room" type="text" maxlength="64" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="例如 mygame01" aria-describedby="lanroomError lanroomWarning">
+          <button class="mode-button" type="submit">開啟</button>
+        </div>
+        <p id="lanroomError" class="mode-error" role="alert"></p>
+        <p id="lanroomWarning" class="mode-warning"></p>
+      </form>
+    </div>
+  </dialog>
+
+  <script>
+    // 點「GM 控制台」時先選模式；房間名稱記在這台裝置，下次直接帶入。
+    (() => {
+      const link = document.getElementById("gmEntryLink");
+      const dialog = document.getElementById("gmModeDialog");
+      if (!link || !dialog || typeof dialog.showModal !== "function") return;
+
+      const STORAGE_KEY = "mapfog.index.lastRooms.v1";
+      const RULES = {
+        olroom: {
+          check: (value) => value.length <= 80,
+          message: "房間名稱最多 80 個字元。"
+        },
+        room: {
+          check: (value) => /^[A-Za-z0-9-]{8,10}$/.test(value),
+          message: "room 房間名稱需為 8–10 個字元，只能用英文字母、數字與 -。"
+        },
+        lanroom: {
+          check: (value) => /^[A-Za-z0-9_-]{1,64}$/.test(value),
+          message: "lanroom 房間名稱只能用英文字母、數字、- 與 _（最多 64 個字元）。"
+        }
+      };
+      let lanChecked = false;
+
+      function readRooms() {
+        try {
+          return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}") || {};
+        } catch {
+          return {};
+        }
+      }
+
+      function saveRoom(mode, value) {
+        try {
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...readRooms(), [mode]: value }));
+        } catch {
+          // 記不住只會讓下次要重新輸入。
+        }
+      }
+
+      // 不是由 LAN 伺服器提供的網頁（例如 start-server.bat）開不了 lanroom，先提醒。
+      async function checkLanServer() {
+        if (lanChecked) return;
+        lanChecked = true;
+        const warning = document.getElementById("lanroomWarning");
+        try {
+          const response = await fetch("lan-api/info", { cache: "no-store" });
+          if (response.ok && (await response.json())?.app === "mapfog-lan") return;
+        } catch {
+          // 連不上就顯示下面的提醒。
+        }
+        warning.textContent = "⚠ 目前的網址不是 MapFog LAN 伺服器提供的，開啟後會無法連線。請先執行 start-lan-server.bat，再用它顯示的網址開啟首頁。";
+      }
+
+      function openDialog() {
+        const rooms = readRooms();
+        for (const mode of Object.keys(RULES)) {
+          const input = dialog.querySelector(`[data-mode="${mode}"] input`);
+          if (!input.value && rooms[mode]) input.value = rooms[mode];
+          setError(mode, "");
+        }
+        dialog.showModal();
+        checkLanServer();
+      }
+
+      function setError(mode, message) {
+        const form = dialog.querySelector(`[data-mode="${mode}"]`);
+        const input = form.querySelector("input");
+        form.querySelector(".mode-error").textContent = message;
+        if (message) input.setAttribute("aria-invalid", "true");
+        else input.removeAttribute("aria-invalid");
+      }
+
+      link.addEventListener("click", (event) => {
+        // Ctrl／中鍵開新分頁時照原本連結直接開 gm.html。
+        if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        openDialog();
+      });
+
+      dialog.querySelector("[data-close]").addEventListener("click", () => dialog.close());
+      dialog.addEventListener("click", (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+
+      for (const form of dialog.querySelectorAll("form")) {
+        const mode = form.dataset.mode;
+        const input = form.querySelector("input");
+        input?.addEventListener("input", () => setError(mode, ""));
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          const url = new URL("gm.html", window.location.href);
+          if (mode !== "quick") {
+            const value = input.value.trim();
+            if (!value) {
+              setError(mode, "請輸入房間名稱。");
+              input.focus();
+              return;
+            }
+            if (!RULES[mode].check(value)) {
+              setError(mode, RULES[mode].message);
+              input.focus();
+              return;
+            }
+            saveRoom(mode, value);
+            url.searchParams.set(mode, value);
+          }
+          window.location.href = url.toString();
+        });
+      }
+    })();
+  </script>
 </body>
 </html>

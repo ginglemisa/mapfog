@@ -15,17 +15,24 @@
   const PANEL_MARGIN = 8;
   const DEFAULT_GM_HINT = "Enter 敵 · ⇧Enter 友";
 
+  // 網址同時帶多種房間參數時整頁停止同步（見 sync-mode.js）。
+  if (window.MapFogSyncMode?.blocked) return;
   const queryParams = new URLSearchParams(window.location.search);
-  const FIREBASE_ROOM_ID = queryParams.get("room") || "";
-  const FIREBASE_SYNC_MODE = queryParams.get("sync") === "firebase";
-  const OFFLINE_ROOM_ID = FIREBASE_ROOM_ID || FIREBASE_SYNC_MODE ? "" : (queryParams.get("olroom") || "");
+  const SYNC_MODE = window.MapFogSyncMode?.mode || "local";
+  const FIREBASE_ROOM_ID = SYNC_MODE === "firebase" ? (queryParams.get("room") || "") : "";
+  const FIREBASE_SYNC_MODE = SYNC_MODE === "firebase" && queryParams.get("sync") === "firebase";
+  const OFFLINE_ROOM_ID = SYNC_MODE === "olroom" ? (queryParams.get("olroom") || "") : "";
+  const LAN_ROOM_ID = SYNC_MODE === "lan" ? (queryParams.get("lanroom") || "") : "";
   const IS_FIREBASE_ROOM = Boolean(FIREBASE_ROOM_ID || FIREBASE_SYNC_MODE);
   const IS_OFFLINE_ROOM = Boolean(OFFLINE_ROOM_ID);
+  const IS_LAN_ROOM = Boolean(LAN_ROOM_ID);
   const FIREBASE_ROOM_KEY = sanitizeStorageSegment(FIREBASE_ROOM_ID || "default");
   const OFFLINE_ROOM_KEY = sanitizeStorageSegment(OFFLINE_ROOM_ID);
+  const LAN_ROOM_KEY = sanitizeStorageSegment(LAN_ROOM_ID);
   const STORAGE_PREFIX = IS_FIREBASE_ROOM
     ? `mapfog.room.${FIREBASE_ROOM_KEY}.`
-    : (IS_OFFLINE_ROOM ? `${OLROOM_STORAGE_PREFIX}${OFFLINE_ROOM_KEY}.` : "");
+    : (IS_LAN_ROOM ? `mapfog.lanroom.${LAN_ROOM_KEY}.`
+      : (IS_OFFLINE_ROOM ? `${OLROOM_STORAGE_PREFIX}${OFFLINE_ROOM_KEY}.` : ""));
   const USE_NAMESPACED_STORAGE_KEYS = Boolean(STORAGE_PREFIX);
   const GM_STATE_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS
     ? `${STORAGE_PREFIX}initiative.gm.v1`
@@ -75,6 +82,7 @@
 
   function getSyncChannelName() {
     if (IS_FIREBASE_ROOM) return `${DEFAULT_SYNC_CHANNEL_NAME}.room.${sanitizeStorageSegment(FIREBASE_ROOM_ID || "default")}`;
+    if (IS_LAN_ROOM) return `${DEFAULT_SYNC_CHANNEL_NAME}.lanroom.${LAN_ROOM_KEY}`;
     if (IS_OFFLINE_ROOM) return `${DEFAULT_SYNC_CHANNEL_NAME}.olroom.${OFFLINE_ROOM_KEY}`;
     return DEFAULT_SYNC_CHANNEL_NAME;
   }
@@ -339,12 +347,13 @@
       }
     };
 
-    if (window.MapFogFirebaseSync) {
-      attach(window.MapFogFirebaseSync);
+    // Firebase 與 LAN 同步服務的 API 相同。
+    if (window.MapFogSync) {
+      attach(window.MapFogSync);
       return;
     }
 
-    window.addEventListener("mapfog:firebase-ready", (event) => attach(event.detail), { once: true });
+    window.addEventListener("mapfog:sync-ready", (event) => attach(event.detail), { once: true });
   }
 
   function createToolbarButton() {

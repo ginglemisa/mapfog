@@ -1,4 +1,4 @@
-// 圖片依內容雜湊存放：記憶體 → 本機 IndexedDB →（room 模式）Firebase。
+// 圖片依內容雜湊存放：記憶體 → 本機 IndexedDB →（room 模式）Firebase／（lanroom 模式）LAN 伺服器。
 // 同一個雜湊的圖片在一台裝置上只下載一次；GM 與玩家、olroom 與 room 共用同一套規則。
 (function () {
   const IMAGE_KEY_PART = "img.";
@@ -35,7 +35,7 @@
     return typeof value === "string" && value.startsWith("data:image/");
   }
 
-  function create({ prefix, remote = false }) {
+  function create({ prefix, remote = false, remoteLabel = "Firebase" }) {
     const localStore = window.MapFogLocalStore;
     const imageKeyPrefix = `${prefix}${IMAGE_KEY_PART}`;
     const memory = new Map();
@@ -81,14 +81,14 @@
       const local = await getLocal(hash);
       if (local || !remote) return local;
 
-      // Firebase 還沒載入（例如離線開啟）時先等待，連上後自動補抓。
+      // 同步服務（Firebase 或 LAN 伺服器）還沒就緒（例如離線開啟）時先等待，連上後自動補抓。
       const fetcher = remoteFetcher || await new Promise((resolve) => remoteWaiters.push(resolve));
       const dataUrl = await fetcher(hash);
       if (!isImageDataUrl(dataUrl)) {
-        console.warn(`[MapFog 圖片] ${hash} 在 Firebase 上找不到`);
+        console.warn(`[MapFog 圖片] ${hash} 在 ${remoteLabel} 上找不到`);
         return "";
       }
-      console.info(`[MapFog 圖片] ${hash} 從 Firebase 下載（${formatBytes(dataUrl.length)}）`);
+      console.info(`[MapFog 圖片] ${hash} 從 ${remoteLabel} 下載（${formatBytes(dataUrl.length)}）`);
       remember(hash, dataUrl);
       return dataUrl;
     }

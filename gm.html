@@ -707,7 +707,7 @@
   <link rel="stylesheet" href="toolbar-ui.css?v=20261021-side-toolbar">
   <link rel="stylesheet" href="map-adjust.css?v=20261021-left-panels">
   <link rel="stylesheet" href="tablet-ui.css?v=20261021-tablet-initiative-drag">
-  <link rel="stylesheet" href="player-qr.css?v=20261021-player-qr">
+  <link rel="stylesheet" href="player-qr.css?v=20261021-lanroom">
 </head>
 <body class="gm-page">
   <div class="wrap">
@@ -1008,6 +1008,12 @@
   <dialog id="playerQrDialog" class="player-qr-dialog" aria-labelledby="playerQrTitle">
     <h2 id="playerQrTitle">玩家加入房間</h2>
     <p class="player-qr-room">目前房間：<strong id="playerQrRoom"></strong></p>
+    <div id="playerQrHostPicker" class="player-qr-host" hidden>
+      <label for="playerQrHost">玩家連線用的位址（這台電腦的區網 IP）</label>
+      <select id="playerQrHost" class="player-qr-url"></select>
+      <input id="playerQrHostManual" class="player-qr-url" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="例如 192.168.43.100" aria-label="手動輸入區網 IP" hidden>
+      <p id="playerQrHostHint" class="player-qr-hint" role="note"></p>
+    </div>
     <div id="playerQrCode" class="player-qr-code" role="img" aria-label="玩家房間 QR Code"></div>
     <label for="playerQrUrl">玩家網址</label>
     <input id="playerQrUrl" class="player-qr-url" type="url" readonly>
@@ -1018,21 +1024,23 @@
     <p id="playerQrStatus" class="player-qr-status" role="status" aria-live="polite"></p>
   </dialog>
 
-  <script src="firebase-sync.js"></script>
-  <script src="connection-status.js?v=20261021-side-toolbar"></script>
+  <script src="sync-mode.js?v=20261021-lanroom"></script>
+  <script src="firebase-sync.js?v=20261021-lanroom"></script>
   <script src="local-store.js"></script>
-  <script src="image-store.js"></script>
-  <script src="dice.js?v=20261021-pl-toolbar"></script>
+  <script src="lan-sync.js?v=20261021-lanroom"></script>
+  <script src="connection-status.js?v=20261021-lanroom"></script>
+  <script src="image-store.js?v=20261021-lanroom"></script>
+  <script src="dice.js?v=20261021-lanroom"></script>
   <script src="map-adjust.js?v=20261021-toolbar-active"></script>
   <script src="image-processing.js?v=20261021-compression"></script>
-  <script src="app.js?v=20261021-left-panels"></script>
-  <script src="initiative-sync.js?v=20261021-tablet-initiative-drag"></script>
+  <script src="app.js?v=20261021-lanroom"></script>
+  <script src="initiative-sync.js?v=20261021-lanroom"></script>
   <script src="tablet-ui.js?v=20261021-left-panels"></script>
   <script src="panel-layout.js?v=20261021-left-panels"></script>
   <script src="vendor/qrcode.min.js?v=1.0.0"></script>
-  <script src="player-qr.js?v=20261021-player-qr"></script>
+  <script src="player-qr.js?v=20261021-lanroom"></script>
   <script>
-    // 讓網頁斷網時也能重新整理（只在 https 或 127.0.0.1 等網址有效，http 區網位址會自動略過）。
+    // 讓網頁斷網時也能重新整理（只在 https 或 127.0.0.1 等網址有效，http 區網位址會自動略過；LAN 模式不需要它也能使用）。
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch((error) => console.warn("[MapFog 離線]", error));
   </script>
 </body>
