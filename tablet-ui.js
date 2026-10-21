@@ -47,10 +47,43 @@
 
   const closeAll = () => closePanels([...GROUPS.left, ...GROUPS.right]);
 
+  // 左上、右上工具列同時只展開一組。展開的那組疊在另一組上面（可以蓋住旋轉或骰子），
+  // 但寬度停在另一組的箭頭前面，所以兩邊的箭頭永遠按得到。
+  const leftToolbar = document.getElementById('floatingToolbar');
+  const rightToolbar = document.getElementById('sideToolbar');
+  const leftToggle = document.getElementById('toolbarToggleBtn');
+  const rightToggle = document.getElementById('sideToolbarToggleBtn');
+  const hasToolbarPair = Boolean(leftToolbar && rightToolbar && leftToggle && rightToggle);
+  const TOOLBAR_GAP = 6;
+  const isExpanded = (toolbar) => !toolbar.classList.contains('collapsed');
+
+  function updateToolbarLimits() {
+    if (!hasToolbarPair || !isTablet()) return;
+    const rootStyle = document.documentElement.style;
+    const leftEdge = leftToolbar.getBoundingClientRect().left;
+    const rightEdge = rightToolbar.getBoundingClientRect().right;
+    const leftMax = rightToggle.getBoundingClientRect().left - TOOLBAR_GAP - leftEdge;
+    const rightMax = rightEdge - leftToggle.getBoundingClientRect().right - TOOLBAR_GAP;
+    rootStyle.setProperty('--tablet-left-toolbar-max', `${Math.max(0, Math.floor(leftMax))}px`);
+    rootStyle.setProperty('--tablet-right-toolbar-max', `${Math.max(0, Math.floor(rightMax))}px`);
+  }
+
+  // 按另一組的箭頭會順便記住收合狀態，和手動收合一樣。
+  function collapseOtherToolbar(opened) {
+    if (!hasToolbarPair || !isTablet() || !isExpanded(opened)) return;
+    const [other, otherToggle] = opened === leftToolbar ? [rightToolbar, rightToggle] : [leftToolbar, leftToggle];
+    if (isExpanded(other)) otherToggle.click();
+  }
+
   function updateMode() {
     const wasTablet = isTablet();
     document.body.classList.toggle('tablet-layout', tabletQuery.matches);
-    if (tabletQuery.matches && !wasTablet) closeAll();
+    if (tabletQuery.matches && !wasTablet) {
+      closeAll();
+      // 兩組都展開時留左上（地圖工具），收起右上。
+      if (hasToolbarPair) collapseOtherToolbar(leftToolbar);
+    }
+    updateToolbarLimits();
   }
 
   // Capture before the original controls' click handlers run. The selected
@@ -69,6 +102,21 @@
     };
     if (buttons[button.id]) closeOthersInGroup(buttons[button.id]);
   }, true);
+
+  // 冒泡階段：app.js 已經切換好被按的那一組，再收起另一組。
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest?.('button');
+    if (button === leftToggle) collapseOtherToolbar(leftToolbar);
+    else if (button === rightToggle) collapseOtherToolbar(rightToolbar);
+  });
+
+  if (hasToolbarPair) {
+    window.addEventListener('resize', updateToolbarLimits);
+    if ('ResizeObserver' in window) {
+      const observer = new ResizeObserver(updateToolbarLimits);
+      [leftToolbar, rightToolbar].forEach((toolbar) => observer.observe(toolbar));
+    }
+  }
 
   // 點地圖不再關閉面板：操作地圖時由 panel-layout.js 暫時隱藏，放開後恢復。
 

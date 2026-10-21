@@ -312,12 +312,11 @@
     button.setAttribute("aria-expanded", "false");
     button.innerHTML = `
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z"/>
-        <path d="M4 7.5 12 12l8-4.5"/>
-        <path d="M12 12v9"/>
-        <circle cx="9" cy="8" r="0.8" fill="currentColor" stroke="none"/>
-        <circle cx="15" cy="8" r="0.8" fill="currentColor" stroke="none"/>
-        <circle cx="12" cy="15" r="0.8" fill="currentColor" stroke="none"/>
+        <path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z"/>
+        <path d="M12 7l5 8.5H7z"/>
+        <path d="M12 2.5V7"/>
+        <path d="M3.8 16.75L7 15.5"/>
+        <path d="M20.2 16.75L17 15.5"/>
       </svg>
     `;
     return button;

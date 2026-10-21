@@ -24,13 +24,6 @@
   transform: none;
   width: max-content;
   max-width: none;
-  gap: 8px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   overflow: visible;
 }
 
