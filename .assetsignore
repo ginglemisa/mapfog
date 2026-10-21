@@ -12,3 +12,5 @@ start-lan-server.bat
 package.json
 package-lock.json
 wrangler.jsonc
+# 開發文件
+docs
