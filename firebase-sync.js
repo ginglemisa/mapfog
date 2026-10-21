@@ -9,21 +9,44 @@
     "https://www.gstatic.com/firebasejs/12.13.0/firebase-database-compat.js"
   ];
 
+  // 連不上 gstatic（例如離線開啟）時每 10 秒重試一次，網路恢復時立刻重試；畫面先顯示本機暫存。
+  const SDK_RETRY_MS = 10000;
+  const loadedScripts = new Set();
+  let sdkRetryTimer = null;
+
   if (shouldUseFirebase) {
+    startWithRetry();
+    window.addEventListener("online", () => {
+      if (sdkRetryTimer !== null) startWithRetry();
+    });
+  }
+
+  function startWithRetry() {
+    window.clearTimeout(sdkRetryTimer);
+    sdkRetryTimer = null;
     loadFirebaseSdk()
       .then(() => startFirebaseSync(requestedRoom || "default"))
       .catch((error) => {
         console.error("[MapFog Firebase]", error);
         window.dispatchEvent(new CustomEvent("mapfog:firebase-error", { detail: { message: String(error?.message || error) } }));
+        sdkRetryTimer = window.setTimeout(startWithRetry, SDK_RETRY_MS);
       });
   }
 
   function loadScript(src) {
+    if (loadedScripts.has(src)) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const script = document.createElement("script");
       script.src = src;
-      script.onload = resolve;
-      script.onerror = () => reject(new Error(`Failed to load ${src}`));
+      script.onload = () => {
+        loadedScripts.add(src);
+        resolve();
+      };
+      script.onerror = () => {
+        // 移除失敗的 script，重試時才會重新下載。
+        script.remove();
+        reject(new Error(`Failed to load ${src}`));
+      };
       document.head.appendChild(script);
     });
   }

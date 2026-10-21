@@ -56,11 +56,24 @@
   badge.append(line, warning);
   document.body.appendChild(badge);
 
-  function render(state) {
+  // 開頁後這麼久還連不上，就當成離線並說明畫面是暫存。
+  const OFFLINE_HINT_DELAY_MS = 4000;
+  const role = document.body.classList.contains("gm-page") ? "gm" : "player";
+  let state = { role, connected: false, everConnected: false, players: 0, gms: 0 };
+  let cacheShown = false;
+  let sdkFailed = false;
+  let waitedLong = false;
+
+  function render() {
+    const offline = !state.connected && (state.everConnected || sdkFailed || waitedLong);
     badge.classList.toggle("online", state.connected);
-    badge.classList.toggle("offline", !state.connected && state.everConnected);
+    badge.classList.toggle("offline", offline);
     if (state.connected) {
       line.textContent = state.role === "gm" ? `已連線・玩家 ${state.players} 人在線` : "已連線";
+    } else if (offline && cacheShown) {
+      line.textContent = "離線中，顯示的是暫存畫面；恢復連線後會自動更新";
+    } else if (sdkFailed) {
+      line.textContent = "無法載入同步服務，恢復網路後會自動重試";
     } else {
       line.textContent = state.everConnected ? "已斷線，網路恢復後會自動重新連線" : "連線中…";
     }
@@ -68,10 +81,24 @@
     warning.hidden = !(state.role === "gm" && state.connected && state.gms > 1);
   }
 
-  window.addEventListener("mapfog:connection", (event) => render(event.detail));
-  window.addEventListener("mapfog:firebase-error", () => {
-    badge.classList.add("offline");
-    line.textContent = "無法載入同步服務，請檢查網路後重新整理";
+  window.addEventListener("mapfog:connection", (event) => {
+    state = event.detail;
+    sdkFailed = false;
+    render();
   });
-  if (window.MapFogFirebaseSync?.getConnectionState) render(window.MapFogFirebaseSync.getConnectionState());
+  window.addEventListener("mapfog:firebase-error", () => {
+    sdkFailed = true;
+    render();
+  });
+  // GM／玩家畫面從本機暫存還原了地圖。
+  window.addEventListener("mapfog:cache-shown", () => {
+    cacheShown = true;
+    render();
+  });
+  window.setTimeout(() => {
+    waitedLong = true;
+    render();
+  }, OFFLINE_HINT_DELAY_MS);
+  if (window.MapFogFirebaseSync?.getConnectionState) state = window.MapFogFirebaseSync.getConnectionState();
+  render();
 })();
