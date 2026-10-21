@@ -40,14 +40,11 @@
   const clearBtn = diceToolbar.querySelector("#diceClearBtn");
   const diceButtons = Array.from(diceToolbar.querySelectorAll("[data-dice-sides]"));
 
-  // GM 放在右上角遊戲工具列的收合按鈕前面，收合後仍留著；玩家頁沿用原本的工具列。
+  // GM 放在右上角遊戲工具列的收合按鈕前面，收合後仍留著；玩家頁放在工具列最右邊的收合按鈕前面。
   const sideToolbar = document.getElementById("sideToolbar");
-  if (sideToolbar) {
-    diceToggleBtn.classList.add("keep-when-collapsed");
-    sideToolbar.insertBefore(diceToggleBtn, sideToolbar.querySelector(".toolbar-toggle"));
-  } else {
-    floatingToolbar.appendChild(diceToggleBtn);
-  }
+  if (sideToolbar) diceToggleBtn.classList.add("keep-when-collapsed");
+  const diceButtonHost = sideToolbar || floatingToolbar;
+  diceButtonHost.insertBefore(diceToggleBtn, diceButtonHost.querySelector(":scope > .toolbar-toggle:last-child"));
   viewport.appendChild(diceToolbar);
   viewport.appendChild(diceLogPanel);
 

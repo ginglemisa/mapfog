@@ -365,12 +365,12 @@
         <path d="M3 18h1"/>
       </svg>
     `;
-    // GM 放在右上角遊戲工具列：Token、先攻、骰子、收合按鈕。玩家頁沿用原本的工具列。
+    // GM 放在右上角遊戲工具列：Token、先攻、骰子、收合按鈕。玩家頁放在工具列最右邊的收合按鈕前面。
     const sideToolbar = document.getElementById("sideToolbar");
     if (sideToolbar) {
       sideToolbar.insertBefore(button, sideToolbar.querySelector("#diceToggleBtn") || sideToolbar.querySelector(".toolbar-toggle"));
     } else {
-      floatingToolbar.appendChild(button);
+      floatingToolbar.insertBefore(button, floatingToolbar.querySelector(":scope > .toolbar-toggle:last-child"));
     }
     return button;
   }

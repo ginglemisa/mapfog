@@ -287,16 +287,26 @@
         width: min(320px, calc(100vw - 16px));
       }
     }
+    /* 收合後留在右上，收合按鈕停在原本的位置：收掉的外框（border 1px + padding）要補回去。 */
+    .player-page .floating-toolbar.collapsed {
+      top: 23px;
+      right: 23px;
+      left: auto;
+    }
+    @media (max-width: 700px) {
+      .player-page .floating-toolbar.collapsed {
+        top: 17px;
+        right: 17px;
+      }
+    }
   </style>
   <link rel="stylesheet" href="toolbar-ui.css?v=20261021-side-toolbar">
   <link rel="stylesheet" href="map-adjust.css?v=20261021-left-panels">
 </head>
 <body class="player-page">
   <div id="viewport" class="viewport">
+    <!-- 工具列在右上：收合按鈕放最右邊，骰子與先攻按鈕由 script 插在它前面；收合後只剩它，位置不變。 -->
     <div id="floatingToolbar" class="floating-toolbar" aria-label="玩家工具列">
-      <button id="toolbarToggleBtn" class="tool-button toolbar-toggle" type="button" title="收合工具列" aria-label="收合工具列" aria-expanded="true" aria-controls="floatingToolbar">
-        <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
-      </button>
       <button id="rotateBtn" class="tool-button" type="button" title="圖片右轉 90°" aria-label="圖片右轉 90 度">
         <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg>
       </button>
@@ -307,6 +317,10 @@
 
       <button id="mapAdjustBtn" class="tool-button" type="button" title="地圖調整" aria-label="地圖調整" aria-controls="mapAdjustPanel" aria-expanded="false">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M4.93 19.07l1.41-1.41"/><path d="M17.66 6.34l1.41-1.41"/></svg>
+      </button>
+
+      <button id="toolbarToggleBtn" class="tool-button toolbar-toggle" type="button" title="收合工具列" aria-label="收合工具列" aria-expanded="true" aria-controls="floatingToolbar">
+        <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
       </button>
     </div>
 
@@ -387,11 +401,11 @@
   <script src="connection-status.js?v=20261021-side-toolbar"></script>
   <script src="local-store.js"></script>
   <script src="image-store.js"></script>
-  <script src="dice.js?v=20261021-side-toolbar"></script>
+  <script src="dice.js?v=20261021-pl-toolbar"></script>
   <script src="map-adjust.js?v=20261021-toolbar-active"></script>
   <script src="image-processing.js?v=20261021-compression"></script>
   <script src="player.js?v=20261021-room-cache"></script>
-  <script src="initiative-sync.js?v=20261021-initiative-rows"></script>
+  <script src="initiative-sync.js?v=20261021-pl-toolbar"></script>
   <script src="panel-layout.js?v=20261021-left-panels"></script>
   <script>
     // 讓網頁斷網時也能重新整理（只在 https 或 127.0.0.1 等網址有效，http 區網位址會自動略過）。
