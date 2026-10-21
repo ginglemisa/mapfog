@@ -78,21 +78,27 @@
 .gm-page.tablet-layout .map-adjust-slider input[type="range"] { min-height: 32px; }
 
 /* Specificity beats initiative/dice styles injected dynamically by JS.
-   先攻固定在左上，和左上其他面板互斥；平板上不拖曳。 */
+   先攻預設在左上，和左上其他面板互斥；可以拖曳標題列移動、拉邊角調整大小。
+   拖曳或拉過之後，initiative-sync.js 寫入的 inline 位置與大小會蓋過這裡的預設值。 */
 .gm-page.tablet-layout #initiativePanel.gm-initiative-panel {
   position: fixed;
-  top: calc(69px + env(safe-area-inset-top)) !important;
-  left: max(12px, env(safe-area-inset-left)) !important;
-  bottom: auto !important;
-  right: auto !important;
-  width: min(308px, calc(50vw - 18px)) !important;
-  height: min(540px, calc(100dvh - 83px - env(safe-area-inset-top) - env(safe-area-inset-bottom))) !important;
-  min-width: 0;
-  max-height: calc(100dvh - 83px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  top: calc(69px + env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+  bottom: auto;
+  right: auto;
+  width: min(308px, calc(50vw - 18px));
+  height: min(540px, calc(100dvh - 83px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
   border-radius: 14px; background: rgba(11, 18, 32, .97);
 }
-.gm-page.tablet-layout #initiativePanel .initiative-panel-header { cursor: default; touch-action: pan-y; }
-.gm-page.tablet-layout #initiativePanel .initiative-resize-handle { display: none; }
+.gm-page.tablet-layout #initiativePanel .initiative-panel-header { touch-action: none; }
+/* 手指用的拉把：下緣與左右放寬、下方兩角 28px，右下角的拉把一直顯示，看得出可以拉。
+   上緣與上方兩角維持原尺寸，避免蓋到標題列的按鈕。 */
+.gm-page.tablet-layout #initiativePanel .resize-s { left: 28px; right: 28px; height: 12px; }
+.gm-page.tablet-layout #initiativePanel .resize-e,
+.gm-page.tablet-layout #initiativePanel .resize-w { bottom: 28px; width: 10px; }
+.gm-page.tablet-layout #initiativePanel .resize-se,
+.gm-page.tablet-layout #initiativePanel .resize-sw { width: 28px; height: 28px; }
+.gm-page.tablet-layout #initiativePanel .resize-se::after { opacity: 0.7; }
 .gm-page.tablet-layout #initiativePanel input,
 .gm-page.tablet-layout #initiativePanel .initiative-add-button { min-height: 40px; }
 .gm-page.tablet-layout #diceToolbar.dice-toolbar {

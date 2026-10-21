@@ -638,8 +638,8 @@
     });
 
     window.addEventListener("resize", () => {
-      // The tablet drawer must not overwrite the remembered desktop size/position.
-      if (document.body.classList.contains("tablet-layout")) return;
+      // 收起時量不到大小，不能拿來覆蓋記住的位置（平板開關鍵盤也會觸發 resize）。
+      if (panel.hidden) return;
       const rect = panel.getBoundingClientRect();
       applyPanelLayout(panel, getPanelLayoutFromRect(rect));
       persistPanelLayout(panel);
@@ -647,7 +647,6 @@
   }
 
   function startPanelInteraction(panel, event, type, edge = "") {
-    if (document.body.classList.contains("tablet-layout")) return;
     if (activePanelInteraction) return;
     event.preventDefault();
     event.stopPropagation();
