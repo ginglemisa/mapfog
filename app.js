@@ -8,7 +8,6 @@ const zoomValue = document.getElementById("zoomValue");
 const resetFogBtn = document.getElementById("resetFogBtn");
 const revealAllFogBtn = document.getElementById("revealAllFogBtn");
 const toggleFogBtn = document.getElementById("toggleFogBtn");
-const toggleFogLabel = document.getElementById("toggleFogLabel");
 const brushModeBtn = document.getElementById("brushModeBtn");
 const rectFogBtn = document.getElementById("rectFogBtn");
 const softBrush = { checked: true };
@@ -534,12 +533,10 @@ function setActiveTool(tool) {
 
 function updateModeButton() {
   const actionLabel = getFogActionLabel();
-  const shortLabel = mode === "erase" ? "擦霧" : "補霧";
   toggleFogBtn.classList.toggle("erase", mode === "erase");
   toggleFogBtn.classList.toggle("fill", mode === "fill");
   // 移動模式不會動到迷霧，擦／補按鈕變淡，但仍可先切好。
   toggleFogBtn.classList.toggle("idle", isPanMode);
-  if (toggleFogLabel) toggleFogLabel.textContent = shortLabel;
   toggleFogBtn.title = mode === "erase" ? "目前：擦除迷霧，點一下改成補霧" : "目前：補上迷霧，點一下改成擦霧";
   toggleFogBtn.setAttribute("aria-label", `目前${actionLabel}，點一下切換`);
 

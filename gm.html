@@ -612,13 +612,18 @@
       transform: none;
       max-width: calc(100vw - 24px - var(--side-toolbar-space, 0px));
     }
-    /* 右下角模式按鈕：疊在連線狀態上方，三種拖曳動作一定剛好亮一顆。 */
+    /* 右下角模式按鈕：疊在連線狀態上方，三種拖曳動作一定剛好亮一顆。
+       只放圖示，排成 [擦霧][移動] / [筆刷][矩形]。 */
     .mode-dock {
       position: fixed;
       right: max(12px, env(safe-area-inset-right));
       bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--connection-status-space, 0px));
       z-index: 37;
       display: grid;
+      grid-template-columns: repeat(2, 42px);
+      grid-template-areas:
+        "fog pan"
+        "brush rect";
       gap: 6px;
       padding: 6px;
       border: 1px solid var(--line);
@@ -631,50 +636,38 @@
       user-select: none;
       -webkit-user-select: none;
     }
+    /* 三選一按鈕的外框不佔位置，按鈕直接排進上面的格子。 */
     .mode-tools {
-      display: grid;
-      grid-template-columns: repeat(3, 56px);
-      gap: 6px;
+      display: contents;
     }
+    #toggleFogBtn { grid-area: fog; }
+    #panModeBtn { grid-area: pan; }
+    #brushModeBtn { grid-area: brush; }
+    #rectFogBtn { grid-area: rect; }
     .mode-action-button,
     .mode-tool-button {
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      width: 42px;
+      height: 42px;
       padding: 0;
       border-radius: 10px;
       background: #0b1220;
       color: var(--muted);
     }
     .mode-action-button {
-      height: 44px;
-      gap: 8px;
       transition: opacity 0.12s ease;
     }
-    .mode-tool-button {
-      height: 54px;
-      flex-direction: column;
-      gap: 3px;
-    }
     .mode-dock svg {
-      width: 22px;
-      height: 22px;
+      width: 16.5px;
+      height: 16.5px;
       stroke: currentColor;
       fill: none;
       stroke-width: 2;
       stroke-linecap: round;
       stroke-linejoin: round;
       pointer-events: none;
-    }
-    .mode-label {
-      font-size: 12px;
-      font-weight: 700;
-      line-height: 1;
-      pointer-events: none;
-    }
-    .mode-action-button .mode-label {
-      font-size: 15px;
-      font-weight: 800;
     }
     /* 擦霧（打開地圖）用亮青色，補霧（蓋回迷霧）用灰色，不靠「亮不亮」判斷。 */
     .mode-action-button.erase {
@@ -797,24 +790,20 @@
           </button>
         </div>
 
-        <!-- 右下角：上面決定畫的時候擦霧或補霧，下面三選一決定拖曳時做什麼。 -->
+        <!-- 右下角：擦霧／補霧決定畫的時候做什麼，移動、筆刷、矩形三選一決定拖曳時做什麼。 -->
         <div id="modeDock" class="mode-dock" role="group" aria-label="繪圖模式">
           <button id="toggleFogBtn" class="mode-action-button erase" type="button">
             <svg viewBox="0 0 24 24"><path d="M3 15c3-5 6-7 9-7s6 2 9 7"/><path d="M5 18h14"/><path d="M12 8V4"/></svg>
-            <span id="toggleFogLabel" class="mode-label">擦霧</span>
           </button>
           <div class="mode-tools" role="radiogroup" aria-label="拖曳時的動作">
             <button id="brushModeBtn" class="mode-tool-button" type="button" role="radio" aria-checked="true">
               <svg viewBox="0 0 24 24"><path d="M14 4l6 6"/><path d="M4 20l3-1 11-11-2-2L5 17z"/></svg>
-              <span class="mode-label">筆刷</span>
             </button>
             <button id="rectFogBtn" class="mode-tool-button" type="button" role="radio" aria-checked="false">
               <svg viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="12" rx="1"/><path d="M8 3v4"/><path d="M3 9h4"/><path d="M17 17h4"/><path d="M16 21v-4"/></svg>
-              <span class="mode-label">矩形</span>
             </button>
             <button id="panModeBtn" class="mode-tool-button" type="button" role="radio" aria-checked="false">
               <svg viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M12 22v-6"/><path d="M2 12h6"/><path d="M22 12h-6"/><path d="M8 8l4-4 4 4"/><path d="M8 16l4 4 4-4"/></svg>
-              <span class="mode-label">移動</span>
             </button>
           </div>
         </div>
@@ -1005,7 +994,7 @@
   <script src="dice.js?v=20261021-side-toolbar"></script>
   <script src="map-adjust.js?v=20261021-toolbar-active"></script>
   <script src="image-processing.js?v=20261021-compression"></script>
-  <script src="app.js?v=20261021-side-toolbar"></script>
+  <script src="app.js?v=20261021-icon-dock"></script>
   <script src="initiative-sync.js?v=20261021-side-toolbar"></script>
   <script src="tablet-ui.js?v=20261021-side-toolbar"></script>
   <script src="panel-layout.js?v=20261021-side-toolbar"></script>
