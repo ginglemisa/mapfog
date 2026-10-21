@@ -606,6 +606,12 @@
         gap: 10px;
       }
     }
+    /* 左上：畫面與地圖工具，靠左排；右上：遊戲面板。寬度不夠時左邊那組橫向捲動，不蓋到右邊那組。 */
+    #floatingToolbar {
+      left: max(12px, env(safe-area-inset-left));
+      transform: none;
+      max-width: calc(100vw - 24px - var(--side-toolbar-space, 0px));
+    }
     /* 右下角模式按鈕：疊在連線狀態上方，三種拖曳動作一定剛好亮一顆。 */
     .mode-dock {
       position: fixed;
@@ -692,9 +698,9 @@
     }
 
   </style>
-  <link rel="stylesheet" href="toolbar-ui.css?v=20261021-toolbar-active">
+  <link rel="stylesheet" href="toolbar-ui.css?v=20261021-side-toolbar">
   <link rel="stylesheet" href="map-adjust.css">
-  <link rel="stylesheet" href="tablet-ui.css?v=20261021-toolbar-active">
+  <link rel="stylesheet" href="tablet-ui.css?v=20261021-side-toolbar">
 </head>
 <body class="gm-page">
   <div class="wrap">
@@ -744,7 +750,7 @@
           <button id="toolbarToggleBtn" class="tool-button toolbar-toggle" type="button" title="收合工具列" aria-label="收合工具列" aria-expanded="true" aria-controls="floatingToolbar">
             <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
           </button>
-          <button id="rotateBtn" class="tool-button" type="button" title="圖片右轉 90°" aria-label="圖片右轉 90 度">
+          <button id="rotateBtn" class="tool-button keep-when-collapsed" type="button" title="圖片右轉 90°" aria-label="圖片右轉 90 度">
             <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg>
           </button>
 
@@ -768,10 +774,6 @@
             <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 10h16"/><path d="M4 16h16"/><path d="M10 4v16"/><path d="M16 4v16"/></svg>
           </button>
 
-          <button id="tokenSettingsBtn" class="tool-button" type="button" title="Token 設定" aria-label="Token 設定" aria-controls="tokenPanel" aria-expanded="false">
-            <svg viewBox="0 0 24 24"><path d="M12 3l7 4v10l-7 4-7-4V7z"/><path d="M12 7l3.5 2v6L12 17l-3.5-2V9z"/></svg>
-          </button>
-
           <button id="mapAdjustBtn" class="tool-button" type="button" title="地圖調整" aria-label="地圖調整" aria-controls="mapAdjustPanel" aria-expanded="false">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M4.93 19.07l1.41-1.41"/><path d="M17.66 6.34l1.41-1.41"/></svg>
           </button>
@@ -782,6 +784,16 @@
 
           <button id="revealAllFogBtn" class="tool-button" type="button" title="全開迷霧" aria-label="全開迷霧">
             <svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+
+        <!-- 右上角：遊戲進行用的面板。先攻與骰子按鈕由各自的 script 插在收合按鈕前面；收合時只留骰子。 -->
+        <div id="sideToolbar" class="floating-toolbar side-toolbar" aria-label="遊戲工具列">
+          <button id="tokenSettingsBtn" class="tool-button" type="button" title="Token 設定" aria-label="Token 設定" aria-controls="tokenPanel" aria-expanded="false">
+            <svg viewBox="0 0 24 24"><path d="M12 3l7 4v10l-7 4-7-4V7z"/><path d="M12 7l3.5 2v6L12 17l-3.5-2V9z"/></svg>
+          </button>
+          <button id="sideToolbarToggleBtn" class="tool-button toolbar-toggle" type="button" title="收合遊戲工具列" aria-label="收合遊戲工具列" aria-expanded="true" aria-controls="sideToolbar">
+            <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
           </button>
         </div>
 
@@ -987,15 +999,16 @@
   </div>
 
   <script src="firebase-sync.js"></script>
-  <script src="connection-status.js"></script>
+  <script src="connection-status.js?v=20261021-side-toolbar"></script>
   <script src="local-store.js"></script>
   <script src="image-store.js"></script>
-  <script src="dice.js"></script>
+  <script src="dice.js?v=20261021-side-toolbar"></script>
   <script src="map-adjust.js?v=20261021-toolbar-active"></script>
   <script src="image-processing.js?v=20261021-compression"></script>
-  <script src="app.js?v=20261021-mode-dock"></script>
-  <script src="initiative-sync.js?v=20261021-room-cache"></script>
-  <script src="tablet-ui.js?v=20261021-toolbar-active"></script>
+  <script src="app.js?v=20261021-side-toolbar"></script>
+  <script src="initiative-sync.js?v=20261021-side-toolbar"></script>
+  <script src="tablet-ui.js?v=20261021-side-toolbar"></script>
+  <script src="panel-layout.js?v=20261021-side-toolbar"></script>
   <script>
     // 讓網頁斷網時也能重新整理（只在 https 或 127.0.0.1 等網址有效，http 區網位址會自動略過）。
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch((error) => console.warn("[MapFog 離線]", error));

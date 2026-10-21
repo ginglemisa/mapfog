@@ -2,13 +2,23 @@
 .gm-page.tablet-layout { -webkit-tap-highlight-color: transparent; }
 .gm-page.tablet-layout .floating-toolbar {
   top: max(10px, env(safe-area-inset-top));
-  max-width: calc(100vw - 88px);
   gap: 5px;
   padding: 5px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
   touch-action: pan-x;
+}
+/* 左上靠左排，寬度讓出右上那組；右上那組靠右，不捲動。 */
+.gm-page.tablet-layout #floatingToolbar {
+  left: max(10px, env(safe-area-inset-left));
+  max-width: calc(100vw - 20px - var(--side-toolbar-space, 0px));
+}
+.gm-page.tablet-layout #sideToolbar {
+  left: auto;
+  right: max(10px, env(safe-area-inset-right));
+  max-width: none;
+  overflow: visible;
 }
 .gm-page.tablet-layout .floating-toolbar::-webkit-scrollbar { display: none; }
 .gm-page.tablet-layout .floating-toolbar .tool-button {
@@ -22,15 +32,20 @@
   top: max(10px, env(safe-area-inset-top));
   left: max(10px, env(safe-area-inset-left));
   max-width: none;
-  gap: 0;
+  gap: 5px;
   padding: 0;
   overflow: visible;
+}
+.gm-page.tablet-layout #sideToolbar.collapsed {
+  left: auto;
+  right: max(10px, env(safe-area-inset-right));
 }
 
 .gm-page.tablet-layout .controls-panel .cache-actions button { min-width: 0; min-height: 44px; flex: 1 1 140px; }
 .gm-page.tablet-layout .controls-panel input[type="range"] { min-height: 32px; }
 
-/* Map settings, grid, token and map adjustment drawers share one anchor. */
+/* Map settings, grid, token, dice and map adjustment drawers share one anchor.
+   They stop above the bottom-right mode buttons so those stay visible. */
 .gm-page.tablet-layout .controls-panel,
 .gm-page.tablet-layout .grid-panel,
 .gm-page.tablet-layout .token-panel,
@@ -38,7 +53,7 @@
   top: calc(69px + env(safe-area-inset-top));
   right: max(12px, env(safe-area-inset-right));
   width: min(362px, calc(100vw - 24px));
-  max-height: calc(100dvh - 83px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-height: calc(100dvh - 83px - env(safe-area-inset-top) - var(--mode-dock-space, 0px));
   border-radius: 14px; background: rgba(11, 18, 32, .97);
 }
 .gm-page.tablet-layout .grid-close-button,
@@ -51,20 +66,21 @@
 .gm-page.tablet-layout .token-panel button { min-height: 44px; }
 .gm-page.tablet-layout .map-adjust-panel {
   top: calc(84px + env(safe-area-inset-top));
-  max-height: calc(100dvh - 98px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-height: calc(100dvh - 98px - env(safe-area-inset-top) - var(--mode-dock-space, 0px));
 }
 .gm-page.tablet-layout .map-adjust-panel .map-adjust-action { min-height: 44px; }
 .gm-page.tablet-layout .map-adjust-panel .map-adjust-close-button { min-width: 44px; width: 44px; height: 44px; }
 .gm-page.tablet-layout .map-adjust-slider input[type="range"] { min-height: 32px; }
 
-/* Specificity beats initiative/dice styles injected dynamically by JS. */
+/* Specificity beats initiative/dice styles injected dynamically by JS.
+   先攻固定在左上，不和右上的面板互斥。 */
 .gm-page.tablet-layout #initiativePanel.gm-initiative-panel {
   position: fixed;
   top: calc(69px + env(safe-area-inset-top)) !important;
-  right: max(12px, env(safe-area-inset-right)) !important;
+  left: max(12px, env(safe-area-inset-left)) !important;
   bottom: auto !important;
-  left: auto !important;
-  width: min(394px, calc(100vw - 24px)) !important;
+  right: auto !important;
+  width: min(308px, calc(100vw - 24px)) !important;
   height: min(540px, calc(100dvh - 83px - env(safe-area-inset-top) - env(safe-area-inset-bottom))) !important;
   min-width: 0;
   max-height: calc(100dvh - 83px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
@@ -76,10 +92,7 @@
 .gm-page.tablet-layout #initiativePanel .initiative-add-button { min-height: 40px; }
 .gm-page.tablet-layout #diceToolbar.dice-toolbar {
   top: calc(69px + env(safe-area-inset-top));
-  left: 50%; right: auto; max-width: calc(100vw - 24px);
-  transform: translateX(-50%); background: rgba(11, 18, 32, .97);
-}
-@media (max-width: 820px) {
-  .gm-page.tablet-layout .floating-toolbar { left: calc(50% + 22px); max-width: calc(100vw - 78px); }
-  .gm-page.tablet-layout #initiativePanel.gm-initiative-panel { width: min(360px, calc(100vw - 24px)) !important; }
+  right: max(12px, env(safe-area-inset-right));
+  left: auto; max-width: calc(100vw - 24px);
+  transform: none; background: rgba(11, 18, 32, .97);
 }

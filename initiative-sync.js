@@ -2,7 +2,8 @@
   const DEFAULT_SYNC_CHANNEL_NAME = "mapfog.sync.v1";
   const DEFAULT_GM_STATE_STORAGE_KEY = "mapfog.initiative.gm.v1";
   const DEFAULT_PUBLIC_STATE_STORAGE_KEY = "mapfog.initiative.public.v1";
-  const DEFAULT_GM_PANEL_LAYOUT_STORAGE_KEY = "mapfog.initiative.panel.gm.v1";
+  // v2：面板改窄，舊版記住的寬度不沿用。
+  const DEFAULT_GM_PANEL_LAYOUT_STORAGE_KEY = "mapfog.initiative.panel.gm.v2";
   const OLROOM_STORAGE_PREFIX = "mapfog.olroom.";
   const INITIATIVE_SYNC_TYPE = "initiativeUpdate";
   const INITIATIVE_REQUEST_TYPE = "requestInitiative";
@@ -33,7 +34,7 @@
     ? `${STORAGE_PREFIX}initiative.public.v1`
     : DEFAULT_PUBLIC_STATE_STORAGE_KEY;
   const GM_PANEL_LAYOUT_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS
-    ? `${STORAGE_PREFIX}initiative.panel.gm.v1`
+    ? `${STORAGE_PREFIX}initiative.panel.gm.v2`
     : DEFAULT_GM_PANEL_LAYOUT_STORAGE_KEY;
   const SYNC_CHANNEL_NAME = getSyncChannelName();
   const syncChannel = "BroadcastChannel" in window ? new BroadcastChannel(SYNC_CHANNEL_NAME) : null;
@@ -364,7 +365,13 @@
         <path d="M3 18h1"/>
       </svg>
     `;
-    floatingToolbar.appendChild(button);
+    // GM 放在右上角遊戲工具列：Token、先攻、骰子、收合按鈕。玩家頁沿用原本的工具列。
+    const sideToolbar = document.getElementById("sideToolbar");
+    if (sideToolbar) {
+      sideToolbar.insertBefore(button, sideToolbar.querySelector("#diceToggleBtn") || sideToolbar.querySelector(".toolbar-toggle"));
+    } else {
+      floatingToolbar.appendChild(button);
+    }
     return button;
   }
 
@@ -577,7 +584,7 @@
     const viewportHeight = viewport.clientHeight || window.innerHeight;
     const maxWidth = Math.max(PANEL_MIN_WIDTH, viewportWidth - PANEL_MARGIN * 2);
     const maxHeight = Math.max(PANEL_MIN_HEIGHT, viewportHeight - PANEL_MARGIN * 2);
-    const width = clamp(Number(layout.width) || 368, PANEL_MIN_WIDTH, maxWidth);
+    const width = clamp(Number(layout.width) || 308, PANEL_MIN_WIDTH, maxWidth);
     const height = clamp(Number(layout.height) || 420, PANEL_MIN_HEIGHT, maxHeight);
 
     return {
@@ -1438,7 +1445,8 @@
         top: 72px;
         left: 12px;
         z-index: 33;
-        width: min(336px, calc(100vw - 16px));
+        /* 名稱欄約 6 個中文字，過長以「…」截斷；拉寬面板時名稱欄跟著變寬。 */
+        width: min(308px, calc(100vw - 16px));
         min-width: 280px;
         min-height: 240px;
         max-height: calc(100svh - 88px);
@@ -1755,6 +1763,8 @@
         min-height: 0;
         overflow: auto;
         display: grid;
+        /* 面板高度固定時（平板、拉過大小），列數少也不要把每列撐高。 */
+        align-content: start;
         gap: 4px;
         padding-right: 2px;
         overscroll-behavior: contain;
@@ -1993,7 +2003,7 @@
         .mapfog-initiative-panel {
           top: 64px;
           left: 8px;
-          width: min(340px, calc(100vw - 16px));
+          width: min(308px, calc(100vw - 16px));
           max-height: calc(100svh - 76px);
         }
         .public-initiative-panel {

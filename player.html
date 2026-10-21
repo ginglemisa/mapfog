@@ -288,7 +288,7 @@
       }
     }
   </style>
-  <link rel="stylesheet" href="toolbar-ui.css?v=20261021-toolbar-active">
+  <link rel="stylesheet" href="toolbar-ui.css?v=20261021-side-toolbar">
   <link rel="stylesheet" href="map-adjust.css">
 </head>
 <body class="player-page">
@@ -384,14 +384,15 @@
     <div class="map-adjust-note">只影響這台裝置的地圖底圖顯示，不會同步給其他人。</div>
   </div>
   <script src="firebase-sync.js"></script>
-  <script src="connection-status.js"></script>
+  <script src="connection-status.js?v=20261021-side-toolbar"></script>
   <script src="local-store.js"></script>
   <script src="image-store.js"></script>
-  <script src="dice.js"></script>
+  <script src="dice.js?v=20261021-side-toolbar"></script>
   <script src="map-adjust.js?v=20261021-toolbar-active"></script>
   <script src="image-processing.js?v=20261021-compression"></script>
   <script src="player.js?v=20261021-room-cache"></script>
-  <script src="initiative-sync.js?v=20261021-room-cache"></script>
+  <script src="initiative-sync.js?v=20261021-side-toolbar"></script>
+  <script src="panel-layout.js?v=20261021-side-toolbar"></script>
   <script>
     // 讓網頁斷網時也能重新整理（只在 https 或 127.0.0.1 等網址有效，http 區網位址會自動略過）。
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch((error) => console.warn("[MapFog 離線]", error));

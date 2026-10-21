@@ -184,12 +184,7 @@ const SCENE_CACHE_KEY = `${LOCAL_CACHE_PREFIX}scene.gm.v3`;
 // Display-only adjustment for this GM browser; never broadcast or written into map snapshots.
 const mapAdjust = window.MapFogMapAdjust?.create({
   canvas: mapCanvas,
-  storageKey: GM_MAP_ADJUST_STORAGE_KEY,
-  onOpen: () => {
-    setControlsPanelOpen(false);
-    setGridPanelOpen(false);
-    setTokenPanelOpen(false);
-  }
+  storageKey: GM_MAP_ADJUST_STORAGE_KEY
 }) ?? null;
 
 let tokenCollectionState = createDefaultTokenCollectionState();
@@ -2510,13 +2505,47 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") persistBeforeLeaving();
 });
 
-toolbarToggleBtn?.addEventListener("click", () => {
-  floatingToolbar?.classList.toggle("collapsed");
-  const collapsed = floatingToolbar?.classList.contains("collapsed");
-  toolbarToggleBtn.title = collapsed ? "展開工具列" : "收合工具列";
-  toolbarToggleBtn.setAttribute("aria-label", collapsed ? "展開工具列" : "收合工具列");
-  toolbarToggleBtn.setAttribute("aria-expanded", String(!collapsed));
-});
+// 左上與右上兩組工具列各自收合，狀態記在這台裝置；收合不會關掉已開的面板。
+function setupToolbarCollapse(toolbar, toggleButton, storageKey, name) {
+  if (!toolbar || !toggleButton) return;
+
+  const apply = (collapsed) => {
+    toolbar.classList.toggle("collapsed", collapsed);
+    const label = collapsed ? `展開${name}` : `收合${name}`;
+    toggleButton.title = label;
+    toggleButton.setAttribute("aria-label", label);
+    toggleButton.setAttribute("aria-expanded", String(!collapsed));
+  };
+
+  let stored = false;
+  try {
+    stored = window.localStorage.getItem(storageKey) === "1";
+  } catch {
+    // Ignore localStorage failures.
+  }
+  apply(stored);
+
+  toggleButton.addEventListener("click", () => {
+    const collapsed = !toolbar.classList.contains("collapsed");
+    apply(collapsed);
+    try {
+      window.localStorage.setItem(storageKey, collapsed ? "1" : "0");
+    } catch {
+      // Ignore localStorage failures.
+    }
+  });
+}
+
+const sideToolbar = document.getElementById("sideToolbar");
+setupToolbarCollapse(floatingToolbar, toolbarToggleBtn, "mapfog.ui.gm.toolbarCollapsed", "工具列");
+setupToolbarCollapse(sideToolbar, document.getElementById("sideToolbarToggleBtn"), "mapfog.ui.gm.sideToolbarCollapsed", "遊戲工具列");
+
+// 左上工具列的最大寬度要讓出右上那組的位置。
+if (sideToolbar && "ResizeObserver" in window) {
+  new ResizeObserver(() => {
+    document.documentElement.style.setProperty("--side-toolbar-space", `${sideToolbar.offsetWidth + 8}px`);
+  }).observe(sideToolbar);
+}
 
 // Keep the native grid/token button and ARIA state in sync with tablet drawers.
 document.addEventListener("mapfog:tablet-close-native-panels", (event) => {
@@ -2527,10 +2556,8 @@ document.addEventListener("mapfog:tablet-close-native-panels", (event) => {
   if (event.detail?.except !== "mapAdjust") mapAdjust?.setOpen(false);
 });
 
+// 電腦版面板可以同時開，由 panel-layout.js 錯開位置；平板版的互斥交給 tablet-ui.js。
 mapSettingsBtn?.addEventListener("click", () => {
-  setGridPanelOpen(false);
-  setTokenPanelOpen(false);
-  mapAdjust?.setOpen(false);
   setControlsPanelOpen(controlsPanel?.hidden);
 });
 
@@ -2539,9 +2566,6 @@ controlsPanelCloseBtn?.addEventListener("click", () => {
 });
 
 gridSettingsBtn?.addEventListener("click", () => {
-  setControlsPanelOpen(false);
-  setTokenPanelOpen(false);
-  mapAdjust?.setOpen(false);
   setGridPanelOpen(gridPanel?.hidden);
 });
 
@@ -2550,9 +2574,6 @@ gridPanelCloseBtn?.addEventListener("click", () => {
 });
 
 tokenSettingsBtn?.addEventListener("click", () => {
-  setControlsPanelOpen(false);
-  setGridPanelOpen(false);
-  mapAdjust?.setOpen(false);
   setTokenPanelOpen(tokenPanel?.hidden);
 });
 

@@ -24,14 +24,17 @@
     document.dispatchEvent(new CustomEvent('mapfog:tablet-close-native-panels', {
       detail: { except }
     }));
-    if (except !== 'initiative') closeStandalonePanel('initiativePanel', 'initiativePanelBtn');
     if (except !== 'dice') closeStandalonePanel('diceToolbar', 'diceToggleBtn');
   }
 
   function updateMode() {
     const wasTablet = isTablet();
     document.body.classList.toggle('tablet-layout', tabletQuery.matches);
-    if (tabletQuery.matches && !wasTablet) closeOthers();
+    if (tabletQuery.matches && !wasTablet) {
+      closeOthers();
+      // 先攻在左上，不和右上面板互斥；只在剛進入平板布局時預設收起。
+      closeStandalonePanel('initiativePanel', 'initiativePanelBtn');
+    }
   }
 
   // Capture before the original controls' click handlers run. The selected
@@ -45,17 +48,12 @@
       gridSettingsBtn: 'grid',
       tokenSettingsBtn: 'token',
       mapAdjustBtn: 'mapAdjust',
-      initiativePanelBtn: 'initiative',
       diceToggleBtn: 'dice'
     };
     if (buttons[button.id]) closeOthers(buttons[button.id]);
   }, true);
 
-  viewport.addEventListener('pointerdown', (event) => {
-    if (!isTablet()) return;
-    if (event.target.closest?.('#floatingToolbar, #toolbarToggleBtn, #controlsPanel, #gridPanel, #tokenPanel, #mapAdjustPanel, #initiativePanel, #diceToolbar')) return;
-    closeOthers();
-  }, true);
+  // 點地圖不再關閉面板：操作地圖時由 panel-layout.js 暫時隱藏，放開後恢復。
 
   document.addEventListener('keydown', (event) => {
     if (isTablet() && event.key === 'Escape') closeOthers();

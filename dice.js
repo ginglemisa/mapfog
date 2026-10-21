@@ -40,7 +40,14 @@
   const clearBtn = diceToolbar.querySelector("#diceClearBtn");
   const diceButtons = Array.from(diceToolbar.querySelectorAll("[data-dice-sides]"));
 
-  floatingToolbar.appendChild(diceToggleBtn);
+  // GM 放在右上角遊戲工具列的收合按鈕前面，收合後仍留著；玩家頁沿用原本的工具列。
+  const sideToolbar = document.getElementById("sideToolbar");
+  if (sideToolbar) {
+    diceToggleBtn.classList.add("keep-when-collapsed");
+    sideToolbar.insertBefore(diceToggleBtn, sideToolbar.querySelector(".toolbar-toggle"));
+  } else {
+    floatingToolbar.appendChild(diceToggleBtn);
+  }
   viewport.appendChild(diceToolbar);
   viewport.appendChild(diceLogPanel);
 
@@ -110,7 +117,21 @@
         left: auto;
         transform: none;
       }
-      .floating-toolbar.collapsed ~ .dice-toolbar,
+      /* GM 的骰子面板從右上角展開，和 Token 面板同一個位置。 */
+      .gm-page .dice-toolbar {
+        position: fixed;
+        top: 72px;
+        right: 16px;
+        left: auto;
+        transform: none;
+      }
+      @media (max-width: 900px) {
+        .gm-page .dice-toolbar {
+          top: 64px;
+          right: 8px;
+        }
+      }
+      body:not(.gm-page) .floating-toolbar.collapsed ~ .dice-toolbar,
       .dice-toolbar[hidden] {
         display: none !important;
       }

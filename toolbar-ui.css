@@ -24,7 +24,7 @@
   transform: none;
   width: max-content;
   max-width: none;
-  gap: 0;
+  gap: 8px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -34,10 +34,31 @@
   overflow: visible;
 }
 
-.floating-toolbar.collapsed > :not(.toolbar-toggle) {
+/* keep-when-collapsed: GM 左上收合時留旋轉，右上收合時留骰子。 */
+.floating-toolbar.collapsed > :not(.toolbar-toggle):not(.keep-when-collapsed) {
   display: none;
 }
 
 .floating-toolbar.collapsed .toolbar-toggle svg {
   transform: rotate(180deg);
+}
+
+/* GM 右上角的遊戲工具列：展開時箭頭朝右（往右收），收合後靠右只留骰子與朝左的箭頭。 */
+.side-toolbar,
+.side-toolbar.collapsed {
+  left: auto;
+  right: max(12px, env(safe-area-inset-right));
+  transform: none;
+}
+
+.side-toolbar {
+  max-width: none;
+  overflow: visible;
+}
+
+/* 操作地圖時暫時隱藏所有面板（panel-layout.js 切換），放開後恢復原狀。 */
+body.map-interacting :is(.controls-panel, .grid-panel, .token-panel, .map-adjust-panel, .mapfog-initiative-panel, .dice-toolbar, .dice-log-panel) {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }

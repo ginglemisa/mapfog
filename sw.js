@@ -20,7 +20,8 @@ const SHELL_FILES = [
   "app.js",
   "player.js",
   "initiative-sync.js",
-  "tablet-ui.js"
+  "tablet-ui.js",
+  "panel-layout.js"
 ];
 const FIREBASE_SDK_FILES = [
   "https://www.gstatic.com/firebasejs/12.13.0/firebase-app-compat.js",
