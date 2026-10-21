@@ -1763,8 +1763,9 @@
         min-height: 0;
         overflow: auto;
         display: grid;
-        /* 面板高度固定時（平板、拉過大小），列數少也不要把每列撐高。 */
+        /* 面板高度固定時（平板、拉過大小）：列數少不要把每列撐高，列數多不要把每列壓扁到重疊。 */
         align-content: start;
+        grid-auto-rows: max-content;
         gap: 4px;
         padding-right: 2px;
         overscroll-behavior: contain;
