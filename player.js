@@ -1580,9 +1580,13 @@ viewport.addEventListener("touchmove", (event) => {
   event.preventDefault();
   const nextDistance = touchDistance(event.touches[0], event.touches[1]);
   scale = clamp(pinchStartScale * (nextDistance / pinchStartDistance), 0.1, 5);
+  // 讓雙指起始中心點下的地圖位置，跟著目前的雙指中心點移動與縮放。
+  const rect = viewport.getBoundingClientRect();
   const mid = touchMidpoint(event.touches[0], event.touches[1]);
-  offsetX = pinchStartOffset.x + mid.x - pinchMidStart.x;
-  offsetY = pinchStartOffset.y + mid.y - pinchMidStart.y;
+  const contentX = (pinchMidStart.x - rect.left - pinchStartOffset.x) / pinchStartScale;
+  const contentY = (pinchMidStart.y - rect.top - pinchStartOffset.y) / pinchStartScale;
+  offsetX = mid.x - rect.left - contentX * scale;
+  offsetY = mid.y - rect.top - contentY * scale;
   applyTransform();
 }, { passive: false });
 
