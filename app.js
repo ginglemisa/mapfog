@@ -1767,7 +1767,9 @@ async function applyRemoteSnapshot(snapshot, options = {}) {
     mapCtx.drawImage(mapImage, 0, 0, width, height);
   }
 
-  if (!options.keepGridSettings) setGridSettings(snapshot.gridSettings ?? createDefaultGridSettings(), { sync: false });
+  // 格線設定可能在地圖下載期間就先送到；換尺寸會清空格線畫布，所以沿用設定時也要重畫。
+  if (options.keepGridSettings) drawGrid();
+  else setGridSettings(snapshot.gridSettings ?? createDefaultGridSettings(), { sync: false });
   fogCtx.clearRect(0, 0, width, height);
 
   if (snapshot.fogDataUrl) {
