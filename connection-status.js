@@ -63,12 +63,16 @@
   let cacheShown = false;
   let sdkFailed = false;
   let waitedLong = false;
+  let deniedRoomId = "";
 
   function render() {
     const offline = !state.connected && (state.everConnected || sdkFailed || waitedLong);
-    badge.classList.toggle("online", state.connected);
-    badge.classList.toggle("offline", offline);
-    if (state.connected) {
+    badge.classList.toggle("online", state.connected && !deniedRoomId);
+    badge.classList.toggle("offline", offline || Boolean(deniedRoomId));
+    if (deniedRoomId) {
+      // 連得上 Firebase，但這個房間的讀寫被規則擋下，同步完全不會發生。
+      line.textContent = `無法使用房間「${deniedRoomId}」：Firebase 拒絕存取。房間名稱需為 8–10 個字元（英文字母、數字或 -），請換一個名稱。`;
+    } else if (state.connected) {
       line.textContent = state.role === "gm" ? `已連線・玩家 ${state.players} 人在線` : "已連線";
     } else if (offline && cacheShown) {
       line.textContent = "離線中，顯示的是暫存畫面；恢復連線後會自動更新";
@@ -88,6 +92,10 @@
   });
   window.addEventListener("mapfog:firebase-error", () => {
     sdkFailed = true;
+    render();
+  });
+  window.addEventListener("mapfog:firebase-denied", (event) => {
+    deniedRoomId = event.detail?.roomId || "default";
     render();
   });
   // GM／玩家畫面從本機暫存還原了地圖。

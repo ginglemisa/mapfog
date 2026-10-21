@@ -109,9 +109,7 @@
           if (value.sourceClientId === clientId) return;
           callback(value);
         },
-        (error) => {
-          console.error("[MapFog Firebase]", error);
-        }
+        logError
       );
       return function unsubscribe() {
         reference.off("value");
@@ -132,8 +130,15 @@
       });
     }
 
+    let deniedReported = false;
+
+    // 房間被資料庫規則拒絕（多半是房間名稱不符合規則）時通知畫面，右下角會顯示原因。
     function logError(error) {
       console.error("[MapFog Firebase]", error);
+      const text = `${error?.code || ""} ${error?.message || error || ""}`;
+      if (deniedReported || !/permission[_ ]denied/i.test(text)) return;
+      deniedReported = true;
+      window.dispatchEvent(new CustomEvent("mapfog:firebase-denied", { detail: { roomId } }));
     }
 
     // 每種事件清單各自記住看過的 key（由舊到新），寫入端靠它刪除超過上限的舊事件。
@@ -272,7 +277,7 @@
         if (Object.keys(changes).length) handlers.onPatch?.(token.id, changes, meta);
       }
 
-      const onError = (error) => console.error("[MapFog Firebase]", error);
+      const onError = logError;
       reference.on("child_added", handleNode, onError);
       reference.on("child_changed", handleNode, onError);
       reference.on("child_removed", (snapshot) => {
