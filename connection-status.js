@@ -56,6 +56,12 @@
   badge.append(line, warning);
   document.body.appendChild(badge);
 
+  // GM 右下角的模式按鈕疊在這個標示上方，標示變高（多行訊息）時跟著往上推。
+  const rootStyle = document.documentElement.style;
+  const updateReservedSpace = () => rootStyle.setProperty("--connection-status-space", `${badge.offsetHeight + 8}px`);
+  if ("ResizeObserver" in window) new ResizeObserver(updateReservedSpace).observe(badge);
+  updateReservedSpace();
+
   // 開頁後這麼久還連不上，就當成離線並說明畫面是暫存。
   const OFFLINE_HINT_DELAY_MS = 4000;
   const role = document.body.classList.contains("gm-page") ? "gm" : "player";

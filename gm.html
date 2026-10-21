@@ -606,6 +606,90 @@
         gap: 10px;
       }
     }
+    /* 右下角模式按鈕：疊在連線狀態上方，三種拖曳動作一定剛好亮一顆。 */
+    .mode-dock {
+      position: fixed;
+      right: max(12px, env(safe-area-inset-right));
+      bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--connection-status-space, 0px));
+      z-index: 37;
+      display: grid;
+      gap: 6px;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(11, 18, 32, 0.82);
+      box-shadow: 0 12px 28px rgba(0,0,0,.35);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .mode-tools {
+      display: grid;
+      grid-template-columns: repeat(3, 56px);
+      gap: 6px;
+    }
+    .mode-action-button,
+    .mode-tool-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border-radius: 10px;
+      background: #0b1220;
+      color: var(--muted);
+    }
+    .mode-action-button {
+      height: 44px;
+      gap: 8px;
+      transition: opacity 0.12s ease;
+    }
+    .mode-tool-button {
+      height: 54px;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .mode-dock svg {
+      width: 22px;
+      height: 22px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      pointer-events: none;
+    }
+    .mode-label {
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+      pointer-events: none;
+    }
+    .mode-action-button .mode-label {
+      font-size: 15px;
+      font-weight: 800;
+    }
+    /* 擦霧（打開地圖）用亮青色，補霧（蓋回迷霧）用灰色，不靠「亮不亮」判斷。 */
+    .mode-action-button.erase {
+      border-color: rgba(56, 189, 248, 0.8);
+      background: rgba(8, 47, 73, 0.92);
+      color: #e0f2fe;
+    }
+    .mode-action-button.fill {
+      border-color: rgba(203, 213, 225, 0.75);
+      background: rgba(71, 85, 105, 0.92);
+      color: #f8fafc;
+    }
+    .mode-action-button.idle {
+      opacity: 0.45;
+    }
+    .mode-tool-button.active {
+      border-color: var(--accent);
+      background: rgba(56, 189, 248, 0.22);
+      color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.5) inset;
+    }
 
   </style>
   <link rel="stylesheet" href="toolbar-ui.css?v=20261021-toolbar-active">
@@ -642,7 +726,7 @@
 
       <div class="footer-note" id="mapUploadStatus" role="status" aria-live="polite" aria-atomic="true"></div>
 <div class="footer-note">
-        操作方式：滑鼠滾輪可縮放；用上方圖示切換拖曳模式；雙指手勢可在觸控裝置上縮放與移動。
+        操作方式：滑鼠滾輪可縮放；用右下角按鈕切換擦霧／補霧與筆刷、矩形、移動；雙指手勢可在觸控裝置上縮放與移動。
       </div>
       <div class="cache-actions" aria-label="本機暫存管理">
         <button id="sendPlayersToRoomBtn" type="button">玩家畫面切到此房間</button>
@@ -660,18 +744,6 @@
           <button id="toolbarToggleBtn" class="tool-button toolbar-toggle" type="button" title="收合工具列" aria-label="收合工具列" aria-expanded="true" aria-controls="floatingToolbar">
             <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
           </button>
-          <button id="toggleFogBtn" class="tool-button" type="button" title="切換擦霧／補霧" aria-label="切換擦霧或補霧">
-            <svg viewBox="0 0 24 24"><path d="M3 15c3-5 6-7 9-7s6 2 9 7"/><path d="M5 18h14"/><path d="M12 8V4"/></svg>
-          </button>
-
-          <button id="rectFogBtn" class="tool-button" type="button" title="矩形擦除／補上迷霧" aria-label="矩形擦除或補上迷霧模式">
-            <svg viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="12" rx="1"/><path d="M8 3v4"/><path d="M3 9h4"/><path d="M17 17h4"/><path d="M16 21v-4"/></svg>
-          </button>
-
-          <button id="panModeBtn" class="tool-button" type="button" title="拖曳地圖模式" aria-label="拖曳地圖模式">
-            <svg viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M12 22v-6"/><path d="M2 12h6"/><path d="M22 12h-6"/><path d="M8 8l4-4 4 4"/><path d="M8 16l4 4 4-4"/></svg>
-          </button>
-
           <button id="rotateBtn" class="tool-button" type="button" title="圖片右轉 90°" aria-label="圖片右轉 90 度">
             <svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg>
           </button>
@@ -711,6 +783,28 @@
           <button id="revealAllFogBtn" class="tool-button" type="button" title="全開迷霧" aria-label="全開迷霧">
             <svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
+        </div>
+
+        <!-- 右下角：上面決定畫的時候擦霧或補霧，下面三選一決定拖曳時做什麼。 -->
+        <div id="modeDock" class="mode-dock" role="group" aria-label="繪圖模式">
+          <button id="toggleFogBtn" class="mode-action-button erase" type="button">
+            <svg viewBox="0 0 24 24"><path d="M3 15c3-5 6-7 9-7s6 2 9 7"/><path d="M5 18h14"/><path d="M12 8V4"/></svg>
+            <span id="toggleFogLabel" class="mode-label">擦霧</span>
+          </button>
+          <div class="mode-tools" role="radiogroup" aria-label="拖曳時的動作">
+            <button id="brushModeBtn" class="mode-tool-button" type="button" role="radio" aria-checked="true">
+              <svg viewBox="0 0 24 24"><path d="M14 4l6 6"/><path d="M4 20l3-1 11-11-2-2L5 17z"/></svg>
+              <span class="mode-label">筆刷</span>
+            </button>
+            <button id="rectFogBtn" class="mode-tool-button" type="button" role="radio" aria-checked="false">
+              <svg viewBox="0 0 24 24"><rect x="5" y="6" width="14" height="12" rx="1"/><path d="M8 3v4"/><path d="M3 9h4"/><path d="M17 17h4"/><path d="M16 21v-4"/></svg>
+              <span class="mode-label">矩形</span>
+            </button>
+            <button id="panModeBtn" class="mode-tool-button" type="button" role="radio" aria-checked="false">
+              <svg viewBox="0 0 24 24"><path d="M12 2v6"/><path d="M12 22v-6"/><path d="M2 12h6"/><path d="M22 12h-6"/><path d="M8 8l4-4 4 4"/><path d="M8 16l4 4 4-4"/></svg>
+              <span class="mode-label">移動</span>
+            </button>
+          </div>
         </div>
 
         <div id="gridPanel" class="grid-panel" role="region" aria-label="格線設定" hidden>
@@ -899,7 +993,7 @@
   <script src="dice.js"></script>
   <script src="map-adjust.js?v=20261021-toolbar-active"></script>
   <script src="image-processing.js?v=20261021-compression"></script>
-  <script src="app.js?v=20261021-room-cache"></script>
+  <script src="app.js?v=20261021-mode-dock"></script>
   <script src="initiative-sync.js?v=20261021-room-cache"></script>
   <script src="tablet-ui.js?v=20261021-toolbar-active"></script>
   <script>

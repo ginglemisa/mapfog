@@ -8,6 +8,8 @@ const zoomValue = document.getElementById("zoomValue");
 const resetFogBtn = document.getElementById("resetFogBtn");
 const revealAllFogBtn = document.getElementById("revealAllFogBtn");
 const toggleFogBtn = document.getElementById("toggleFogBtn");
+const toggleFogLabel = document.getElementById("toggleFogLabel");
+const brushModeBtn = document.getElementById("brushModeBtn");
 const rectFogBtn = document.getElementById("rectFogBtn");
 const softBrush = { checked: true };
 const panModeBtn = document.getElementById("panModeBtn");
@@ -518,32 +520,59 @@ function getFogActionLabel() {
   return mode === "erase" ? "擦除迷霧" : "補上迷霧";
 }
 
+// 觸控沒有右鍵，提示改說單指與雙指能做什麼。
+const isTouchPrimary = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+
+function getActiveTool() {
+  if (isPanMode) return "pan";
+  return drawingTool === "rect" ? "rect" : "brush";
+}
+
+function setActiveTool(tool) {
+  isPanMode = tool === "pan";
+  drawingTool = tool === "rect" ? "rect" : "brush";
+  rectDrag = null;
+  hideRectFogPreview();
+  updateModeButton();
+  updateModeNote();
+}
+
 function updateModeButton() {
   const actionLabel = getFogActionLabel();
-  toggleFogBtn.classList.toggle("active", mode === "fill");
-  toggleFogBtn.title = mode === "erase" ? "目前模式：擦除迷霧，點一下改成補霧" : "目前模式：補上迷霧，點一下改成擦霧";
+  const shortLabel = mode === "erase" ? "擦霧" : "補霧";
+  toggleFogBtn.classList.toggle("erase", mode === "erase");
+  toggleFogBtn.classList.toggle("fill", mode === "fill");
+  // 移動模式不會動到迷霧，擦／補按鈕變淡，但仍可先切好。
+  toggleFogBtn.classList.toggle("idle", isPanMode);
+  if (toggleFogLabel) toggleFogLabel.textContent = shortLabel;
+  toggleFogBtn.title = mode === "erase" ? "目前：擦除迷霧，點一下改成補霧" : "目前：補上迷霧，點一下改成擦霧";
+  toggleFogBtn.setAttribute("aria-label", `目前${actionLabel}，點一下切換`);
 
-  if (rectFogBtn) {
-    const rectActive = drawingTool === "rect";
-    rectFogBtn.classList.toggle("active", rectActive);
-    rectFogBtn.setAttribute("aria-pressed", String(rectActive));
-    rectFogBtn.title = rectActive ? `目前模式：矩形${actionLabel}` : "矩形擦除／補上迷霧";
-    rectFogBtn.setAttribute("aria-label", rectActive ? `目前模式：矩形${actionLabel}` : "矩形擦除或補上迷霧模式");
+  const activeTool = getActiveTool();
+  const toolButtons = [
+    [brushModeBtn, "brush", `筆刷${actionLabel}`],
+    [rectFogBtn, "rect", `矩形${actionLabel}`],
+    [panModeBtn, "pan", "移動地圖，不會改到迷霧"]
+  ];
+  for (const [button, tool, label] of toolButtons) {
+    if (!button) continue;
+    const active = activeTool === tool;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-checked", String(active));
+    button.title = label;
+    button.setAttribute("aria-label", label);
   }
 }
 
 function updateModeNote() {
   const actionLabel = getFogActionLabel();
-  const drawingLabel = drawingTool === "rect" ? `矩形${actionLabel}模式` : "繪圖模式";
+  const drawingLabel = drawingTool === "rect" ? `矩形${actionLabel}` : `筆刷${actionLabel}`;
+  const panHint = isTouchPrimary ? "雙指可縮放與移動地圖" : "右鍵拖曳會移動地圖";
+  const dragHint = isTouchPrimary ? "單指拖曳" : "左鍵拖曳";
 
-  if (panModeBtn) {
-    panModeBtn.classList.toggle("active", isPanMode);
-    panModeBtn.setAttribute("aria-pressed", String(isPanMode));
-    panModeBtn.title = isPanMode ? "目前是平移模式：拖曳地圖，不會擦除迷霧。" : `目前是${drawingLabel}：左鍵拖曳會${actionLabel}，右鍵拖曳會移動地圖。`;
-  }
   modeNote.textContent = isPanMode
-    ? "目前是平移模式：拖曳地圖，不會擦除迷霧。"
-    : `目前是${drawingLabel}：左鍵拖曳會${actionLabel}，右鍵拖曳會移動地圖。`;
+    ? `目前是移動模式：${isTouchPrimary ? "單指" : ""}拖曳地圖，不會改到迷霧。`
+    : `目前是${drawingLabel}：${dragHint}會${actionLabel}，${panHint}。`;
 }
 
 function gridColorToRgba() {
@@ -2434,24 +2463,9 @@ toggleFogBtn.addEventListener("click", () => {
   updateModeButton();
   updateModeNote();
 });
-rectFogBtn?.addEventListener("click", () => {
-  drawingTool = drawingTool === "rect" ? "brush" : "rect";
-  if (drawingTool === "rect") isPanMode = false;
-  rectDrag = null;
-  hideRectFogPreview();
-  updateModeButton();
-  updateModeNote();
-});
-panModeBtn?.addEventListener("click", () => {
-  isPanMode = !isPanMode;
-  if (isPanMode) {
-    drawingTool = "brush";
-    rectDrag = null;
-    hideRectFogPreview();
-    updateModeButton();
-  }
-  updateModeNote();
-});
+brushModeBtn?.addEventListener("click", () => setActiveTool("brush"));
+rectFogBtn?.addEventListener("click", () => setActiveTool("rect"));
+panModeBtn?.addEventListener("click", () => setActiveTool("pan"));
 
 rotateBtn?.addEventListener("click", () => {
   flushPendingDraws();
