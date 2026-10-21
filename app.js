@@ -1,4 +1,6 @@
 const fileInput = document.getElementById("fileInput");
+const mapUploadStatus = document.getElementById("mapUploadStatus");
+let processingMap = false;
 const brushSize = document.getElementById("brushSize");
 const brushSizeValue = document.getElementById("brushSizeValue");
 const zoomRange = document.getElementById("zoomRange");
@@ -1766,37 +1768,53 @@ async function applyRemoteMapState(mapState, options = {}) {
   }
 }
 
-function loadImageFromDataUrl(dataUrl) {
-  const img = new Image();
-  img.onload = () => {
-    clearPendingDraws();
-    currentImage = img;
-    currentMapDataUrl = dataUrl;
-    mapAdjust?.setMapSource(dataUrl);
-    viewRotation = 0;
-    setCanvasSize(img.naturalWidth, img.naturalHeight);
-    mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
-    mapCtx.drawImage(img, 0, 0);
-    drawGrid();
-    resetFog({ sync: false });
-    showCanvases();
-    updateGridControls();
-    renderTokens();
-    fitToViewport();
-    if (IS_FIREBASE_ROOM && firebaseSync?.setFogHistoryBase) {
-      setFirebaseFogHistoryBase("covered").finally(() => broadcastSnapshot());
-      return;
-    }
-    broadcastSnapshot();
-  };
-  img.src = dataUrl;
+async function loadImageFromDataUrl(dataUrl) {
+  // 成功解碼處理後的圖片，才替換目前的地圖。
+  const img = await loadImage(dataUrl);
+  clearPendingDraws();
+  currentImage = img;
+  currentMapDataUrl = dataUrl;
+  mapAdjust?.setMapSource(dataUrl);
+  viewRotation = 0;
+  setCanvasSize(img.naturalWidth, img.naturalHeight);
+  mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+  mapCtx.drawImage(img, 0, 0);
+  drawGrid();
+  resetFog({ sync: false });
+  showCanvases();
+  updateGridControls();
+  renderTokens();
+  fitToViewport();
+  if (IS_FIREBASE_ROOM && firebaseSync?.setFogHistoryBase) {
+    setFirebaseFogHistoryBase("covered").finally(() => broadcastSnapshot());
+    return;
+  }
+  broadcastSnapshot();
 }
 
-function loadImageFromFile(file) {
-  currentMapFileName = file.name || "map";
-  const reader = new FileReader();
-  reader.onload = (event) => loadImageFromDataUrl(event.target.result);
-  reader.readAsDataURL(file);
+async function loadImageFromFile(file) {
+  if (!file || processingMap) return;
+  processingMap = true;
+  fileInput.disabled = true;
+  fileInput.setAttribute("aria-busy", "true");
+  mapUploadStatus.textContent = "正在處理地圖…";
+  try {
+    // 等待畫面先顯示提示，再開始解碼、壓縮。
+    await new Promise(resolve => window.setTimeout(resolve, 0));
+    const result = await window.MapFogImageProcessing.processMap(file, { room: IS_FIREBASE_ROOM });
+    await loadImageFromDataUrl(result.dataUrl);
+    currentMapFileName = file.name || "map";
+    remoteMapSaveErrorReported = false;
+    mapUploadStatus.textContent = result.summary;
+  } catch (error) {
+    console.error("[MapFog map upload]", error);
+    mapUploadStatus.textContent = `地圖處理失敗：${error?.message || "請改用較小的 PNG、JPG 或 WebP 後重試。"}`;
+  } finally {
+    processingMap = false;
+    fileInput.disabled = false;
+    fileInput.removeAttribute("aria-busy");
+    fileInput.value = "";
+  }
 }
 
 function eventToCanvasPoint(event) {

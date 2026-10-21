@@ -625,8 +625,8 @@
       <div id="controlsBody" class="controls-body">
         <div class="toolbar">
         <div class="field field-upload">
-          <label for="fileInput">上傳地圖圖片（JPG / PNG）</label>
-          <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+          <label for="fileInput">上傳地圖圖片（JPG / PNG / WebP）</label>
+          <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-describedby="mapUploadStatus">
         </div>
 
         <div class="field slider-field">
@@ -640,6 +640,7 @@
         </div>
         </div>
 
+      <div class="footer-note" id="mapUploadStatus" role="status" aria-live="polite" aria-atomic="true"></div>
 <div class="footer-note">
         操作方式：滑鼠滾輪可縮放；用上方圖示切換拖曳模式；雙指手勢可在觸控裝置上縮放與移動。
       </div>
