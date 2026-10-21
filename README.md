@@ -183,8 +183,8 @@ GM 與玩家、olroom 與 room 都使用同一套本機暫存（瀏覽器的 Ind
 
 準備：執行 `start-server.bat`。用**同一個瀏覽器**開兩個視窗：
 
-- 視窗 1：`http://127.0.0.1:8765/gm.html?olroom=test1`
-- 視窗 2：`http://127.0.0.1:8765/player.html?olroom=test1`
+- 視窗 1：`http://127.0.0.1:8765/gm.html?olroom=testroom1`
+- 視窗 2：`http://127.0.0.1:8765/player.html?olroom=testroom1`
 
 步驟：
 
@@ -208,12 +208,12 @@ GM 與玩家、olroom 與 room 都使用同一套本機暫存（瀏覽器的 Ind
 
 ### B. 兩台裝置（room）
 
-準備：先確認 Firebase 資料庫規則允許 `rooms/{room}` 讀寫（見上方範例）。
+準備：先確認 Firebase 資料庫規則允許 `rooms/{room}` 讀寫（見上方範例）。**房間名稱必須是 8–10 個字元**（英文字母、數字或連字號 `-`）；`test1`、`cache1` 這種太短的名稱會被 Firebase 規則拒絕（`permission_denied`），畫面會一直連不上資料，看起來像是同步失敗。
 
 用你平常讓玩家連線的網址開啟：
 
-- 裝置 1（GM）：`…/gm.html?room=test1`
-- 裝置 2（玩家，例如平板或手機）：`…/player.html?room=test1`
+- 裝置 1（GM）：`…/gm.html?room=testroom1`
+- 裝置 2（玩家，例如平板或手機）：`…/player.html?room=testroom1`
 
 步驟：
 
@@ -226,7 +226,7 @@ GM 與玩家、olroom 與 room 都使用同一套本機暫存（瀏覽器的 Ind
    - 玩家畫面右下角變成紅點「已斷線」。
    - 約 1 分鐘內 GM 的在線玩家數減 1（Firebase 偵測斷線需要一點時間）。
    - 打開 Wi-Fi，玩家畫面恢復「已連線」，GM 的人數也加回來。
-7. **兩個 GM 警告**：在另一個分頁也開 `gm.html?room=test1`，兩個 GM 畫面右下角都出現黃色警告。關掉其中一個後，警告消失。
+7. **兩個 GM 警告**：在另一個分頁也開 `gm.html?room=testroom1`，兩個 GM 畫面右下角都出現黃色警告。關掉其中一個後，警告消失。
 8. **清除 room**：GM 在地圖設定按「清除目前 room 暫存」。鎖定的 token 不會被補回來，玩家畫面的 token 也清空。
 
 ### C. 圖片壓縮：同一台電腦、兩個視窗（olroom）
@@ -249,7 +249,7 @@ GM 與玩家、olroom 與 room 都使用同一套本機暫存（瀏覽器的 Ind
 
 ### D. 圖片壓縮：兩台裝置（room）
 
-準備：使用可從兩台裝置開啟的網站網址，以及 Firebase 規則允許的測試房間。`127.0.0.1` 在每台裝置都指向自己，不能讓平板連到筆電；請用平常的網站網址，或同網路下筆電的區域網路位址。若出現 `permission_denied`，先確認該測試房間的規則。
+準備：使用可從兩台裝置開啟的網站網址，以及 Firebase 規則允許的測試房間。`127.0.0.1` 在每台裝置都指向自己，不能讓平板連到筆電；請用平常的網站網址，或同網路下筆電的區域網路位址。若出現 `permission_denied`，先確認房間名稱是 8–10 個字元，再確認該測試房間的規則。
 
 1. 裝置 1 開 `…/gm.html?room=image-test`，裝置 2 開 `…/player.html?room=image-test`。重做 C 的第 1～6 步；兩台裝置應收到同樣的處理後圖片。
 2. **確認 token 流量**：兩邊各上傳一張 1–2MB 照片。在 Firebase Console 的 Realtime Database 資料頁，`rooms/image-test/token/tokensById` 裡的 token 只有 `imageHash`；到 `rooms/image-test/images/{那個雜湊}` 查看 `dataUrl`，應以 `data:image/webp;base64,` 開頭。將**單張圖片節點**匯出 JSON，下載檔案通常只有幾十 KB，而不是原本的 1–2MB。圖片細節會影響容量，PNG 備用輸出可能更大。
@@ -291,11 +291,11 @@ Token 寬、高應都是 256；有透明左上角的地圖，其左上角透明�
 - Chromium 實際驗證 olroom 雙頁同步、三種 token 來源、置中裁切、256×256、JPG／WebP 原始內容保留、8000×6000 縮圖、透明度、重新整理還原、失敗後保留地圖、亮度與 JPG 匯出。手機寬度與平板觸控版面也已檢查。
 - 模擬不支援 WebP，驗證圖片／文字 token 與地圖的 PNG 備用流程；另外驗證不支援畫布濾鏡時的亮度匯出。
 - 隔離的 room 上傳測試確認只送合格結果、6 次上限與失敗保留舊圖。約 1.56MB 測試照片輸出約 41KB 的 WebP 字串；28.35MB 高細節 PNG 在 PNG 備用流程中縮為 1296×1296，完整傳送字串約 7.61MB。
-- **尚未通過實機驗證**：iPad Safari 未有實機可測；實際 Firebase 測試房間的讀寫被目前規則以 `permission_denied` 拒絕，因此沒有宣稱跨裝置實際傳送或斷線重連已通過。請依 D、E 補測。
+- **尚未通過實機驗證**：iPad Safari 未有實機可測；實際 Firebase 測試房間的讀寫被目前規則以 `permission_denied` 拒絕，因此沒有宣稱跨裝置實際傳送或斷線重連已通過。請依 D、E 補測。（第 3 階段查出原因：當時用的測試房間名稱短於 8 個字元，被規則擋下；改用 8–10 個字元的名稱即可讀寫。）
 
 ### F. 本機暫存與離線：同一台電腦、兩個瀏覽器視窗（olroom）
 
-準備：同 A，用同一個瀏覽器開 `gm.html?olroom=cache1` 與 `player.html?olroom=cache1`。
+準備：同 A，用同一個瀏覽器開 `gm.html?olroom=cachetest1` 與 `player.html?olroom=cachetest1`。
 
 1. GM 上傳地圖與 2 個 token，擦掉幾塊迷霧、移動一個 token。玩家畫面一致。
 2. **重新整理玩家**：按 F5。地圖、迷霧形狀、token 位置立刻出現，和 GM 一致。
@@ -310,7 +310,7 @@ Token 寬、高應都是 256；有透明左上角的地圖，其左上角透明�
 
 1. **重新整理不再下載圖片**：
    - GM 上傳一張大地圖（例如 3MB 以上）與 2 個 token，擦幾塊迷霧。
-   - 玩家第一次開 `…/player.html?room=cache1`，等地圖出現。Console 會看到「從 Firebase 下載（x MB）」。
+   - 玩家第一次開 `…/player.html?room=cachetest1`，等地圖出現。Console 會看到「從 Firebase 下載（x MB）」。
    - 玩家按重新整理：地圖、迷霧、token 幾乎立刻出現。Console 只看到「從本機暫存載入…不需下載」，沒有「從 Firebase 下載」。
    - 也可以到 Firebase Console 的「用量」頁比較：多次重新整理，下載量幾乎不增加（用量頁約有 1 小時延遲）。
    - Firebase 走 WebSocket 連線，開發者工具「網路」頁籤不會一筆一筆列出下載；要看的話點選 `.firebasedatabase.app` 那一列，切到「訊息」查看。
@@ -324,7 +324,7 @@ Token 寬、高應都是 256；有透明左上角的地圖，其左上角透明�
    - 玩家打開 Wi-Fi：迷霧形狀、token 位置與數量都和 GM 一致。
 4. **GM 斷線期間的操作**：GM 關掉 Wi-Fi，擦霧、移動 token，**不要關分頁**。打開 Wi-Fi 後，玩家畫面跟上 GM。
 5. **GM 換新地圖、刪 token**：
-   - 在 Firebase Console 打開 `rooms/cache1/imageIndex`，記下目前地圖的雜湊（也就是 `rooms/cache1/map` 的 `hash`）。
+   - 在 Firebase Console 打開 `rooms/cachetest1/imageIndex`，記下目前地圖的雜湊（也就是 `rooms/cachetest1/map` 的 `hash`）。
    - GM 上傳另一張地圖，再刪除一個 token。
    - 玩家拿到新地圖，被刪的 token 消失。
    - 約 1 分鐘後重新整理 Firebase Console：`imageIndex` 與 `images` 中舊地圖、被刪 token 的雜湊都已消失；新地圖與其他 token 的圖片還在。
@@ -332,7 +332,7 @@ Token 寬、高應都是 256；有透明左上角的地圖，其左上角透明�
 
 #### 本階段開發驗證紀錄（2026-10-21，第 3 階段）
 
-- 以 Chrome 無頭模式加自動化腳本，連實際 Firebase 測試房間（測完即清除）驗證：
+- 網頁由本機伺服器 `http://127.0.0.1:8765` 提供，以 Chrome 無頭模式加自動化腳本，連實際 Firebase 測試房間（房間名稱 8 個字元，測完即清除）驗證：
   - room：玩家重新整理不下載圖片（2.1MB → 2.6KB）、玩家斷線期間 GM 擦霧超過 200 筆觸發壓縮並移動 token 後重連一致、全開／重設同步、清除房間後玩家清掉暫存、GM 重新整理不下載圖片。
   - 斷網重新整理（Service Worker 實際無網路）顯示暫存畫面與離線提示，恢復網路後自動跟上。
   - GM 在同步服務載入失敗時擦霧、移動與新增 token，中途重新整理後恢復網路，修改正確補送給玩家。
