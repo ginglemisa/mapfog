@@ -1,0 +1,18 @@
+{
+  "name": "mapfog",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MapFog TRPG fog-of-war map with optional LAN (local network) room server.",
+  "license": "UNLICENSED",
+  "main": "lan-server.js",
+  "scripts": {
+    "lan": "node lan-server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  }
+}
