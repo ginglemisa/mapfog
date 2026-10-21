@@ -606,6 +606,19 @@
         gap: 10px;
       }
     }
+    /* 左上工具列的面板（地圖設定、格線）從左上展開；Token 與骰子從右上展開。電腦版的實際位置由 panel-layout.js 錯開。 */
+    .controls-panel,
+    .grid-panel {
+      left: 12px;
+      right: auto;
+    }
+    @media (max-width: 900px) {
+      .controls-panel,
+      .grid-panel {
+        left: 8px;
+        right: auto;
+      }
+    }
     /* 左上：畫面與地圖工具，靠左排；右上：遊戲面板。寬度不夠時左邊那組橫向捲動，不蓋到右邊那組。 */
     #floatingToolbar {
       left: max(12px, env(safe-area-inset-left));
@@ -692,8 +705,8 @@
 
   </style>
   <link rel="stylesheet" href="toolbar-ui.css?v=20261021-side-toolbar">
-  <link rel="stylesheet" href="map-adjust.css">
-  <link rel="stylesheet" href="tablet-ui.css?v=20261021-side-toolbar">
+  <link rel="stylesheet" href="map-adjust.css?v=20261021-left-panels">
+  <link rel="stylesheet" href="tablet-ui.css?v=20261021-left-panels">
 </head>
 <body class="gm-page">
   <div class="wrap">
@@ -994,10 +1007,10 @@
   <script src="dice.js?v=20261021-side-toolbar"></script>
   <script src="map-adjust.js?v=20261021-toolbar-active"></script>
   <script src="image-processing.js?v=20261021-compression"></script>
-  <script src="app.js?v=20261021-icon-dock"></script>
+  <script src="app.js?v=20261021-left-panels"></script>
   <script src="initiative-sync.js?v=20261021-initiative-rows"></script>
-  <script src="tablet-ui.js?v=20261021-side-toolbar"></script>
-  <script src="panel-layout.js?v=20261021-initiative-anchor"></script>
+  <script src="tablet-ui.js?v=20261021-left-panels"></script>
+  <script src="panel-layout.js?v=20261021-left-panels"></script>
   <script>
     // 讓網頁斷網時也能重新整理（只在 https 或 127.0.0.1 等網址有效，http 區網位址會自動略過）。
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch((error) => console.warn("[MapFog 離線]", error));

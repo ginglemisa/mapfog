@@ -2547,10 +2547,11 @@ if (sideToolbar && "ResizeObserver" in window) {
 // Keep the native grid/token button and ARIA state in sync with tablet drawers.
 document.addEventListener("mapfog:tablet-close-native-panels", (event) => {
   if (!document.body.classList.contains("tablet-layout")) return;
-  if (event.detail?.except !== "controls") setControlsPanelOpen(false);
-  if (event.detail?.except !== "grid") setGridPanelOpen(false);
-  if (event.detail?.except !== "token") setTokenPanelOpen(false);
-  if (event.detail?.except !== "mapAdjust") mapAdjust?.setOpen(false);
+  const close = event.detail?.close || [];
+  if (close.includes("controls")) setControlsPanelOpen(false);
+  if (close.includes("grid")) setGridPanelOpen(false);
+  if (close.includes("token")) setTokenPanelOpen(false);
+  if (close.includes("mapAdjust")) mapAdjust?.setOpen(false);
 });
 
 // 電腦版面板可以同時開，由 panel-layout.js 錯開位置；平板版的互斥交給 tablet-ui.js。

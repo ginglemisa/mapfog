@@ -18,23 +18,39 @@
     }
   }
 
-  function closeOthers(except = '') {
-    if (!isTablet()) return;
+  // 左上與右上各自只開一個面板；左右兩邊可以同時各開一個。
+  // 先攻按鈕在右上，但面板在左上，所以算左上。
+  const GROUPS = {
+    left: ['controls', 'grid', 'mapAdjust', 'initiative'],
+    right: ['token', 'dice']
+  };
+  const STANDALONE = {
+    initiative: ['initiativePanel', 'initiativePanelBtn'],
+    dice: ['diceToolbar', 'diceToggleBtn']
+  };
+
+  function closePanels(names) {
+    if (!isTablet() || !names.length) return;
     // Existing app.js setters also update ARIA and active button state.
     document.dispatchEvent(new CustomEvent('mapfog:tablet-close-native-panels', {
-      detail: { except }
+      detail: { close: names }
     }));
-    if (except !== 'dice') closeStandalonePanel('diceToolbar', 'diceToggleBtn');
+    for (const name of names) {
+      if (STANDALONE[name]) closeStandalonePanel(...STANDALONE[name]);
+    }
   }
+
+  function closeOthersInGroup(name) {
+    const group = GROUPS.left.includes(name) ? GROUPS.left : GROUPS.right;
+    closePanels(group.filter((other) => other !== name));
+  }
+
+  const closeAll = () => closePanels([...GROUPS.left, ...GROUPS.right]);
 
   function updateMode() {
     const wasTablet = isTablet();
     document.body.classList.toggle('tablet-layout', tabletQuery.matches);
-    if (tabletQuery.matches && !wasTablet) {
-      closeOthers();
-      // 先攻在左上，不和右上面板互斥；只在剛進入平板布局時預設收起。
-      closeStandalonePanel('initiativePanel', 'initiativePanelBtn');
-    }
+    if (tabletQuery.matches && !wasTablet) closeAll();
   }
 
   // Capture before the original controls' click handlers run. The selected
@@ -48,15 +64,16 @@
       gridSettingsBtn: 'grid',
       tokenSettingsBtn: 'token',
       mapAdjustBtn: 'mapAdjust',
+      initiativePanelBtn: 'initiative',
       diceToggleBtn: 'dice'
     };
-    if (buttons[button.id]) closeOthers(buttons[button.id]);
+    if (buttons[button.id]) closeOthersInGroup(buttons[button.id]);
   }, true);
 
   // 點地圖不再關閉面板：操作地圖時由 panel-layout.js 暫時隱藏，放開後恢復。
 
   document.addEventListener('keydown', (event) => {
-    if (isTablet() && event.key === 'Escape') closeOthers();
+    if (isTablet() && event.key === 'Escape') closeAll();
   });
 
   tabletQuery.addEventListener?.('change', updateMode);

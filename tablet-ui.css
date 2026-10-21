@@ -44,17 +44,26 @@
 .gm-page.tablet-layout .controls-panel .cache-actions button { min-width: 0; min-height: 44px; flex: 1 1 140px; }
 .gm-page.tablet-layout .controls-panel input[type="range"] { min-height: 32px; }
 
-/* Map settings, grid, token, dice and map adjustment drawers share one anchor.
-   They stop above the bottom-right mode buttons so those stay visible. */
+/* 兩個抽屜位置：左上放地圖設定、格線、地圖調整與先攻，右上放 Token 與骰子；
+   左右各開一個，所以寬度不超過半個畫面。停在右下角模式按鈕上方，按鈕保持可見。 */
 .gm-page.tablet-layout .controls-panel,
 .gm-page.tablet-layout .grid-panel,
 .gm-page.tablet-layout .token-panel,
 .gm-page.tablet-layout .map-adjust-panel {
   top: calc(69px + env(safe-area-inset-top));
-  right: max(12px, env(safe-area-inset-right));
-  width: min(362px, calc(100vw - 24px));
+  width: min(362px, calc(50vw - 18px));
   max-height: calc(100dvh - 83px - env(safe-area-inset-top) - var(--mode-dock-space, 0px));
   border-radius: 14px; background: rgba(11, 18, 32, .97);
+}
+.gm-page.tablet-layout .controls-panel,
+.gm-page.tablet-layout .grid-panel,
+.gm-page.tablet-layout .map-adjust-panel {
+  left: max(12px, env(safe-area-inset-left));
+  right: auto;
+}
+.gm-page.tablet-layout .token-panel {
+  left: auto;
+  right: max(12px, env(safe-area-inset-right));
 }
 .gm-page.tablet-layout .grid-close-button,
 .gm-page.tablet-layout .token-close-button,
@@ -64,23 +73,19 @@
 .gm-page.tablet-layout .grid-nudge { grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); }
 .gm-page.tablet-layout .grid-panel-body { grid-template-columns: 136px minmax(0, 1fr); }
 .gm-page.tablet-layout .token-panel button { min-height: 44px; }
-.gm-page.tablet-layout .map-adjust-panel {
-  top: calc(84px + env(safe-area-inset-top));
-  max-height: calc(100dvh - 98px - env(safe-area-inset-top) - var(--mode-dock-space, 0px));
-}
 .gm-page.tablet-layout .map-adjust-panel .map-adjust-action { min-height: 44px; }
 .gm-page.tablet-layout .map-adjust-panel .map-adjust-close-button { min-width: 44px; width: 44px; height: 44px; }
 .gm-page.tablet-layout .map-adjust-slider input[type="range"] { min-height: 32px; }
 
 /* Specificity beats initiative/dice styles injected dynamically by JS.
-   先攻固定在左上，不和右上的面板互斥。 */
+   先攻固定在左上，和左上其他面板互斥；平板上不拖曳。 */
 .gm-page.tablet-layout #initiativePanel.gm-initiative-panel {
   position: fixed;
   top: calc(69px + env(safe-area-inset-top)) !important;
   left: max(12px, env(safe-area-inset-left)) !important;
   bottom: auto !important;
   right: auto !important;
-  width: min(308px, calc(100vw - 24px)) !important;
+  width: min(308px, calc(50vw - 18px)) !important;
   height: min(540px, calc(100dvh - 83px - env(safe-area-inset-top) - env(safe-area-inset-bottom))) !important;
   min-width: 0;
   max-height: calc(100dvh - 83px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
@@ -93,6 +98,6 @@
 .gm-page.tablet-layout #diceToolbar.dice-toolbar {
   top: calc(69px + env(safe-area-inset-top));
   right: max(12px, env(safe-area-inset-right));
-  left: auto; max-width: calc(100vw - 24px);
+  left: auto; max-width: calc(50vw - 18px);
   transform: none; background: rgba(11, 18, 32, .97);
 }
