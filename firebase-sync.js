@@ -1,8 +1,8 @@
 (function () {
   const query = new URLSearchParams(window.location.search);
   const requestedRoom = query.get("room");
-  const requestedMode = query.get("sync");
-  const shouldUseFirebase = Boolean(requestedRoom) || requestedMode === "firebase";
+  // 由 sync-mode.js 判斷：只有 room 模式才用 Firebase；lanroom、olroom 或參數衝突時完全不載入 SDK。
+  const shouldUseFirebase = window.MapFogSyncMode?.mode === "firebase";
   // 只有 room 模式才下載 SDK；單機離線時不必等 gstatic 連線逾時。
   const FIREBASE_SDK_URLS = [
     "https://www.gstatic.com/firebasejs/12.13.0/firebase-app-compat.js",
@@ -449,8 +449,11 @@
     api.getConnectionState = () => ({ ...connectionState });
 
     window.MapFogFirebaseSync = api;
+    // 各模組透過 MapFogSync／mapfog:sync-ready 取得同步服務，不必分辨是 Firebase 還是 LAN。
+    window.MapFogSync = api;
     console.info("[MapFog Firebase] connected", { roomId, clientId });
     window.dispatchEvent(new CustomEvent("mapfog:firebase-ready", { detail: api }));
+    window.dispatchEvent(new CustomEvent("mapfog:sync-ready", { detail: api }));
     emitConnectionState();
   }
 

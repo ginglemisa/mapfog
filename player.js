@@ -42,30 +42,39 @@ const LOCAL_IMAGE_PRUNE_DELAY_MS = 5000;
 // 圖片與 id 只在新增時送出，其餘欄位可以單獨更新。
 const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order", "locked"];
 const TOKEN_GEOMETRY_KEYS = ["x", "y", "size", "shape"];
+// 網址同時帶多種房間參數時，sync-mode.js 已顯示衝突說明；這裡直接停止，不啟動任何同步通道。
+if (window.MapFogSyncMode?.blocked) throw new Error("[MapFog] 網址同時包含多種同步模式參數，玩家畫面已停止。");
 const queryParams = new URLSearchParams(window.location.search);
-const FIREBASE_ROOM_ID = queryParams.get("room") || "";
-const FIREBASE_SYNC_MODE = queryParams.get("sync") === "firebase";
-const OFFLINE_ROOM_ID = FIREBASE_ROOM_ID || FIREBASE_SYNC_MODE ? "" : (queryParams.get("olroom") || "");
+const SYNC_MODE = window.MapFogSyncMode?.mode || "local";
+const FIREBASE_ROOM_ID = SYNC_MODE === "firebase" ? (queryParams.get("room") || "") : "";
+const FIREBASE_SYNC_MODE = SYNC_MODE === "firebase" && queryParams.get("sync") === "firebase";
+const OFFLINE_ROOM_ID = SYNC_MODE === "olroom" ? (queryParams.get("olroom") || "") : "";
+const LAN_ROOM_ID = SYNC_MODE === "lan" ? (queryParams.get("lanroom") || "") : "";
 const IS_FIREBASE_ROOM = Boolean(FIREBASE_ROOM_ID || FIREBASE_SYNC_MODE);
 const IS_OFFLINE_ROOM = Boolean(OFFLINE_ROOM_ID);
+const IS_LAN_ROOM = Boolean(LAN_ROOM_ID);
+// room（Firebase）與 lanroom（LAN 伺服器）都由同步服務負責一切，規則相同；olroom 走 BroadcastChannel。
+const IS_REMOTE_ROOM = IS_FIREBASE_ROOM || IS_LAN_ROOM;
 const FIREBASE_ROOM_KEY = sanitizeStorageSegment(FIREBASE_ROOM_ID || "default");
 const OFFLINE_ROOM_KEY = sanitizeStorageSegment(OFFLINE_ROOM_ID);
+const LAN_ROOM_KEY = sanitizeStorageSegment(LAN_ROOM_ID);
 const STORAGE_PREFIX = IS_FIREBASE_ROOM
   ? `mapfog.room.${FIREBASE_ROOM_KEY}.`
-  : (IS_OFFLINE_ROOM ? `${OLROOM_STORAGE_PREFIX}${OFFLINE_ROOM_KEY}.` : "");
+  : (IS_LAN_ROOM ? `mapfog.lanroom.${LAN_ROOM_KEY}.`
+    : (IS_OFFLINE_ROOM ? `${OLROOM_STORAGE_PREFIX}${OFFLINE_ROOM_KEY}.` : ""));
 const USE_NAMESPACED_STORAGE_KEYS = Boolean(STORAGE_PREFIX);
 const SYNC_CHANNEL_NAME = getSyncChannelName();
 const SHARED_GRID_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}grid.v1` : DEFAULT_SHARED_GRID_STORAGE_KEY;
 const PLAYER_VIEW_STATE_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}playerView.v1` : DEFAULT_PLAYER_VIEW_STATE_STORAGE_KEY;
 const PLAYER_MAP_ADJUST_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}playerMapAdjust.v1` : DEFAULT_PLAYER_MAP_ADJUST_STORAGE_KEY;
-// Firebase room 已經同步一切；同機再走 BroadcastChannel 會讓柔邊擦霧被套用兩次。
-const syncChannel = !IS_FIREBASE_ROOM && "BroadcastChannel" in window ? new BroadcastChannel(SYNC_CHANNEL_NAME) : null;
+// Firebase room／LAN 房間已經同步一切；同機再走 BroadcastChannel 會讓柔邊擦霧被套用兩次。
+const syncChannel = !IS_REMOTE_ROOM && "BroadcastChannel" in window ? new BroadcastChannel(SYNC_CHANNEL_NAME) : null;
 // GM 的跨房間控制訊息：切換玩家房間、清除所有 olroom 暫存。
-const controlChannel = !IS_FIREBASE_ROOM && "BroadcastChannel" in window ? new BroadcastChannel(CONTROL_CHANNEL_NAME) : null;
+const controlChannel = !IS_REMOTE_ROOM && "BroadcastChannel" in window ? new BroadcastChannel(CONTROL_CHANNEL_NAME) : null;
 const localStore = window.MapFogLocalStore;
-// 本機暫存的名稱開頭：room／olroom 各自分開，沒有房間參數的預設畫面用 mapfog.shared.。
+// 本機暫存的名稱開頭：room／lanroom／olroom 各自分開，沒有房間參數的預設畫面用 mapfog.shared.。
 const LOCAL_CACHE_PREFIX = STORAGE_PREFIX || "mapfog.shared.";
-const imageStore = window.MapFogImageStore.create({ prefix: LOCAL_CACHE_PREFIX, remote: IS_FIREBASE_ROOM });
+const imageStore = window.MapFogImageStore.create({ prefix: LOCAL_CACHE_PREFIX, remote: IS_REMOTE_ROOM, remoteLabel: IS_LAN_ROOM ? "LAN 伺服器" : "Firebase" });
 // 玩家最後看到的畫面：地圖雜湊、迷霧畫布與進度、token、格線。開頁時先顯示它，再跟 GM／Firebase 比對。
 const SCENE_CACHE_KEY = `${LOCAL_CACHE_PREFIX}scene.player.v3`;
 // 同一台電腦的 GM 畫面暫存；玩家自己的暫存比較舊或沒有時改用它（例如 GM 先準備好 olroom 地圖）。
@@ -131,6 +140,7 @@ function sanitizeStorageSegment(value) {
 
 function getSyncChannelName() {
   if (IS_FIREBASE_ROOM) return `${DEFAULT_SYNC_CHANNEL_NAME}.room.${FIREBASE_ROOM_KEY}`;
+  if (IS_LAN_ROOM) return `${DEFAULT_SYNC_CHANNEL_NAME}.lanroom.${LAN_ROOM_KEY}`;
   if (IS_OFFLINE_ROOM) return `${DEFAULT_SYNC_CHANNEL_NAME}.olroom.${OFFLINE_ROOM_KEY}`;
   return DEFAULT_SYNC_CHANNEL_NAME;
 }
@@ -143,13 +153,14 @@ function roundCanvasValue(value) {
   return Math.round(value * 10) / 10;
 }
 
+// 同步服務（Firebase 或 LAN）就緒後交給 callback；兩者 API 相同。
 function whenFirebaseReady(callback) {
-  if (window.MapFogFirebaseSync) {
-    callback(window.MapFogFirebaseSync);
+  if (window.MapFogSync) {
+    callback(window.MapFogSync);
     return;
   }
 
-  window.addEventListener("mapfog:firebase-ready", (event) => callback(event.detail), { once: true });
+  window.addEventListener("mapfog:sync-ready", (event) => callback(event.detail), { once: true });
 }
 
 function writeSharedState(key, value) {
@@ -171,7 +182,7 @@ function readSharedState(key) {
 }
 
 function isWaitingForFirebase() {
-  return IS_FIREBASE_ROOM && !firebaseSync;
+  return IS_REMOTE_ROOM && !firebaseSync;
 }
 
 function scheduleSceneCache() {
@@ -213,7 +224,7 @@ function writeSceneCache(force = false) {
 }
 
 function restoreOfflineChanges(saved) {
-  if (!IS_FIREBASE_ROOM || !saved) return;
+  if (!IS_REMOTE_ROOM || !saved) return;
   (saved.added || []).forEach((tokenId) => offlineChanges.added.add(tokenId));
   (saved.patched || []).forEach((tokenId) => offlineChanges.patched.add(tokenId));
   (saved.removed || []).forEach((tokenId) => offlineChanges.removed.add(tokenId));
@@ -518,7 +529,7 @@ function rememberNewImage(dataUrl) {
 // room 模式把圖片寫到 images/{雜湊}；一定要在引用它的 token 之前寫，其他人才抓得到。
 function uploadImage(hash, kind) {
   const dataUrl = imageStore.peek(hash);
-  if (!IS_FIREBASE_ROOM || !firebaseSync || !hash || !dataUrl) return;
+  if (!IS_REMOTE_ROOM || !firebaseSync || !hash || !dataUrl) return;
   firebaseSync.putImage(hash, dataUrl, kind).catch(logFirebaseError);
 }
 
@@ -1153,7 +1164,7 @@ function applyPendingRemoteFogSync() {
 
 // 從目前進度之後開始聽擦霧紀錄；斷線再久，重新連線後 Firebase 會把漏掉的依序補上。
 function listenFogBatches() {
-  if (!IS_FIREBASE_ROOM || !firebaseSync || !fogSync.epoch || fogBatchListenEpoch === fogSync.epoch) return;
+  if (!IS_REMOTE_ROOM || !firebaseSync || !fogSync.epoch || fogBatchListenEpoch === fogSync.epoch) return;
   stopFogBatches();
   const epoch = fogSync.epoch;
   fogBatchListenEpoch = epoch;
@@ -1373,7 +1384,8 @@ function patchIncomingToken(tokenId, changes, sourceRole) {
   if (!existing) return;
   const accepted = pickTokenFields(changes || {}, TOKEN_SYNC_KEYS);
   // GM 對鎖定 token 的變更（包含把玩家的修改改回去）一定要套用，不受本機拖曳保護影響。
-  const isGmLockedChange = sourceRole === "gm" && (accepted.locked ?? existing.locked);
+  // "server"：LAN 伺服器拒絕玩家修改後送回的權威版本，同樣要套用。
+  const isGmLockedChange = (sourceRole === "gm" || sourceRole === "server") && (accepted.locked ?? existing.locked);
   if (getProtectedTokenId() === tokenId && !isGmLockedChange) {
     for (const key of TOKEN_GEOMETRY_KEYS) delete accepted[key];
   }
@@ -1410,7 +1422,7 @@ function flushQueuedTokenUpdates() {
 // 地圖、迷霧與 token 存在 IndexedDB，不會觸發 storage 事件；只有格線還能走 localStorage 備援。
 if (!syncChannel) {
   window.addEventListener("storage", (event) => {
-    if (IS_FIREBASE_ROOM) return;
+    if (IS_REMOTE_ROOM) return;
 
     try {
       if (event.key === SHARED_GRID_STORAGE_KEY && event.newValue) {

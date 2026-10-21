@@ -1,7 +1,8 @@
-// room 模式右下角的連線標示：已連線／已斷線、GM 畫面顯示在線玩家數，同房間有兩個 GM 時提醒。
+// room／lanroom 模式右下角的連線標示：已連線／已斷線、GM 畫面顯示在線玩家數，同房間有兩個 GM 時提醒。
 (function () {
-  const query = new URLSearchParams(window.location.search);
-  if (!query.get("room") && query.get("sync") !== "firebase") return;
+  const syncMode = window.MapFogSyncMode?.mode;
+  if (syncMode !== "firebase" && syncMode !== "lan") return;
+  const isLan = syncMode === "lan";
 
   const style = document.createElement("style");
   style.textContent = `
@@ -71,7 +72,37 @@
   let waitedLong = false;
   let deniedRoomId = "";
 
+  // LAN 模式只看與 LAN 伺服器的連線，跟有沒有網際網路無關。
+  function renderLan() {
+    const authProblem = state.authProblem;
+    const offline = !state.connected && (state.everConnected || waitedLong || Boolean(authProblem));
+    badge.classList.toggle("online", state.connected);
+    badge.classList.toggle("offline", offline);
+    if (authProblem) {
+      line.textContent = authProblem.code === "gm-key-required" || authProblem.code === "gm-key-invalid"
+        ? `LAN 模式・需要 GM 管理金鑰：${authProblem.message} 請重新整理後輸入 LAN 伺服器視窗顯示的金鑰。`
+        : `LAN 模式・無法加入房間：${authProblem.message}`;
+    } else if (state.connected) {
+      const queued = state.queued ? `・${state.queued} 筆同步中` : "";
+      line.textContent = state.role === "gm" ? `LAN 模式・已連線・玩家 ${state.players} 人在線${queued}` : `LAN 模式・已連線${queued}`;
+    } else if (!state.everConnected && waitedLong) {
+      // 從來沒連上：多半是 LAN 伺服器沒啟動、網址不是 LAN 伺服器提供的，或不在同一個 Wi-Fi。
+      const pending = state.queued ? `${state.queued} 筆修改會在連上後送出。` : "";
+      line.textContent = `LAN 模式・無法連線至 LAN 伺服器${cacheShown ? "（顯示的是暫存畫面）" : ""}。請確認 GM 筆電已執行 start-lan-server.bat、這台裝置連在同一個 Wi-Fi／熱點，並使用伺服器視窗顯示的網址；會自動重試。${pending}`;
+    } else if (state.everConnected) {
+      const pending = state.queued ? `，${state.queued} 筆修改會在重新連線後送出` : "";
+      line.textContent = `LAN 模式・已斷線，正在重新連線（第 ${Math.max(1, Number(state.attempt) || 0)} 次）${pending}`;
+    } else {
+      line.textContent = "LAN 模式・連線中…";
+    }
+    warning.hidden = !(state.role === "gm" && state.connected && state.gms > 1);
+  }
+
   function render() {
+    if (isLan) {
+      renderLan();
+      return;
+    }
     const offline = !state.connected && (state.everConnected || sdkFailed || waitedLong);
     badge.classList.toggle("online", state.connected && !deniedRoomId);
     badge.classList.toggle("offline", offline || Boolean(deniedRoomId));
@@ -113,6 +144,6 @@
     waitedLong = true;
     render();
   }, OFFLINE_HINT_DELAY_MS);
-  if (window.MapFogFirebaseSync?.getConnectionState) state = window.MapFogFirebaseSync.getConnectionState();
+  if (window.MapFogSync?.getConnectionState) state = window.MapFogSync.getConnectionState();
   render();
 })();

@@ -71,6 +71,26 @@
   color: #082f49;
   font-weight: 700;
 }
+/* LAN 模式、GM 用 localhost 開啟時：選擇玩家要連的區網位址。 */
+.player-qr-host {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.player-qr-host[hidden],
+.player-qr-host input[hidden] {
+  display: none;
+}
+.player-qr-host label {
+  margin-bottom: 0;
+  font-size: 13px;
+}
+.player-qr-hint {
+  margin: 0;
+  color: #fbbf24;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .player-qr-status {
   min-height: 1.4em;
   margin: 10px 0 0;
