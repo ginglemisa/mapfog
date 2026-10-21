@@ -220,11 +220,11 @@
         const token = stripTokenMeta(node);
 
         // 沒有圖片的節點是「別人剛刪掉、這邊又送了位置更新」留下的殘骸，不能當成 token。
-        if (!token.id || !token.imageDataUrl) {
+        if (!token.id || !token.imageHash) {
           handlers.onGhost?.(snapshot.key);
           return;
         }
-        if (!previous?.id || !previous.imageDataUrl) {
+        if (!previous?.id || !previous.imageHash) {
           handlers.onAdd?.(token, meta);
           return;
         }
@@ -242,8 +242,12 @@
       reference.on("child_removed", (snapshot) => {
         const node = snapshot.val() || {};
         lastNodes.delete(snapshot.key);
-        if (node.id && node.imageDataUrl) handlers.onRemove?.(node.id);
+        if (node.id && node.imageHash) handlers.onRemove?.(node.id);
       }, onError);
+      // 第一次讀完時告訴畫面目前有哪些 token，讓畫面移除暫存裡已被刪掉的 token。
+      reference.once("value")
+        .then((snapshot) => handlers.onInitialSync?.(Object.values(snapshot.val() || {}).map((node) => node?.id).filter(Boolean)))
+        .catch(onError);
       return function unsubscribe() {
         reference.off();
       };
@@ -294,7 +298,9 @@
           gridSettings: null,
           initiative: null,
           token: null,
-          events: null
+          events: null,
+          images: null,
+          imageIndex: null
         });
       },
       saveFogState(fogState) {
@@ -346,7 +352,21 @@
       onGridSettings(callback) {
         return listen("gridSettings", (value) => callback(stripMeta(value)));
       },
-      // 新增 token 才寫入完整節點（含圖片）；之後的修改只 update 有變的欄位。
+      // 圖片存在 images/{雜湊}，只在本機沒有時用 once() 單獨下載；imageIndex 很小，GM 用它找出沒人用的圖片。
+      putImage(hash, dataUrl, kind) {
+        if (!hash || !dataUrl) return Promise.resolve();
+        return roomPath("").update({
+          [`images/${hash}`]: { dataUrl, kind },
+          [`imageIndex/${hash}`]: { kind, bytes: dataUrl.length, addedAt: firebase.database.ServerValue.TIMESTAMP }
+        });
+      },
+      getImage(hash) {
+        return roomPath(`images/${hash}/dataUrl`).once("value").then((snapshot) => {
+          const value = snapshot.val();
+          return typeof value === "string" ? value : "";
+        });
+      },
+      // 新增 token 才寫入完整節點（含圖片雜湊）；之後的修改只 update 有變的欄位。
       addToken(token, sourceRole) {
         if (!token?.id) return Promise.resolve();
         return tokenRef(token.id).set({ ...token, ...tokenMeta(sourceRole) });
@@ -354,7 +374,7 @@
       updateToken(tokenId, changes, sourceRole) {
         const updates = {};
         for (const [key, value] of Object.entries(changes || {})) {
-          if (key === "id" || key === "imageDataUrl" || value === undefined) continue;
+          if (key === "id" || key === "imageHash" || value === undefined) continue;
           updates[key] = value;
         }
         if (!tokenId || !Object.keys(updates).length) return Promise.resolve();

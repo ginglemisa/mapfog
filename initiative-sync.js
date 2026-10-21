@@ -1242,7 +1242,7 @@
       .map((anchor) => [anchor.dataset.hpTokenId, anchor]));
     for (const token of tokenState.tokens) {
       const entry = getTokenInitiativeEntry(token);
-      if (!initiativeState.showTokenHp || !entry || !token.visible || !token.imageDataUrl) continue;
+      if (!initiativeState.showTokenHp || !entry || !token.visible || !token.imageHash) continue;
       visibleIds.add(token.id);
       let anchor = anchors.get(token.id);
       if (!anchor) {

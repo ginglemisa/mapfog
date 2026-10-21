@@ -71,6 +71,9 @@ const syncChannel = !IS_FIREBASE_ROOM && "BroadcastChannel" in window ? new Broa
 // GM 的跨房間控制訊息：切換玩家房間、清除所有 olroom 暫存。
 const controlChannel = !IS_FIREBASE_ROOM && "BroadcastChannel" in window ? new BroadcastChannel(CONTROL_CHANNEL_NAME) : null;
 const localStore = window.MapFogLocalStore;
+// 本機暫存的名稱開頭：room／olroom 各自分開，沒有房間參數的預設畫面用 mapfog.shared.。
+const LOCAL_CACHE_PREFIX = STORAGE_PREFIX || "mapfog.shared.";
+const imageStore = window.MapFogImageStore.create({ prefix: LOCAL_CACHE_PREFIX, remote: IS_FIREBASE_ROOM });
 // 地圖調整只存在這個玩家的瀏覽器，不會同步給 GM 或其他玩家。
 const mapAdjust = window.MapFogMapAdjust?.create({
   canvas: mapCanvas,
@@ -214,7 +217,7 @@ function normalizeGridSettings(settings = {}) {
 
 function createDefaultTokenState() {
   return {
-    imageDataUrl: "",
+    imageHash: "",
     x: 0,
     y: 0,
     size: TOKEN_DEFAULT_SIZE,
@@ -224,19 +227,19 @@ function createDefaultTokenState() {
 }
 
 function normalizeTokenState(state = {}) {
-  const imageDataUrl = typeof state.imageDataUrl === "string" ? state.imageDataUrl : "";
+  const imageHash = typeof state.imageHash === "string" ? state.imageHash : "";
   const fallbackX = mapCanvas.width ? mapCanvas.width / 2 : 0;
   const fallbackY = mapCanvas.height ? mapCanvas.height / 2 : 0;
   const x = Number.isFinite(Number(state.x)) ? Number(state.x) : fallbackX;
   const y = Number.isFinite(Number(state.y)) ? Number(state.y) : fallbackY;
 
   return {
-    imageDataUrl,
+    imageHash,
     x,
     y,
     size: clamp(Number(state.size ?? TOKEN_DEFAULT_SIZE), TOKEN_MIN_SIZE, TOKEN_MAX_SIZE),
     shape: state.shape === "hex" ? "hex" : "square",
-    visible: Boolean(state.visible && imageDataUrl)
+    visible: Boolean(state.visible && imageHash)
   };
 }
 
@@ -325,7 +328,7 @@ function createTokenId() {
 
 function createDefaultTokenState(overrides = {}) {
   return {
-    id: overrides.id || createTokenId(), name: "", imageDataUrl: "",
+    id: overrides.id || createTokenId(), name: "", imageHash: "",
     x: mapCanvas.width ? mapCanvas.width / 2 : 0,
     y: mapCanvas.height ? mapCanvas.height / 2 : 0,
     size: TOKEN_DEFAULT_SIZE, shape: "square", visible: false, ...overrides
@@ -333,19 +336,20 @@ function createDefaultTokenState(overrides = {}) {
 }
 
 function normalizeTokenState(state = {}) {
-  const imageDataUrl = typeof state.imageDataUrl === "string" ? state.imageDataUrl : "";
+  // token 只記圖片雜湊；圖片本身在圖片暫存（imageStore）裡。
+  const imageHash = typeof state.imageHash === "string" ? state.imageHash : "";
   return {
     id: typeof state.id === "string" && state.id ? state.id : createTokenId(),
     name: typeof state.name === "string" ? state.name.trim() : "",
     initiativeLabel: typeof state.initiativeLabel === "string" ? state.initiativeLabel.trim() : "",
     initiativeEntryId: typeof state.initiativeEntryId === "string" ? state.initiativeEntryId : "",
     hpFontSize: clamp(Math.round(Number(state.hpFontSize) || 24), 8, 96),
-    imageDataUrl,
+    imageHash,
     x: Number.isFinite(Number(state.x)) ? Number(state.x) : (mapCanvas.width ? mapCanvas.width / 2 : 0),
     y: Number.isFinite(Number(state.y)) ? Number(state.y) : (mapCanvas.height ? mapCanvas.height / 2 : 0),
     size: clamp(Number(state.size ?? TOKEN_DEFAULT_SIZE), TOKEN_MIN_SIZE, TOKEN_MAX_SIZE),
     shape: state.shape === "hex" ? "hex" : "square",
-    visible: Boolean(state.visible && imageDataUrl),
+    visible: Boolean(state.visible && imageHash),
     // 建立時間，用來決定 token 清單與疊放順序；各自存在 token 上，同時新增也不會互相蓋掉。
     order: Number.isFinite(Number(state.order)) ? Number(state.order) : 0,
     locked: Boolean(state.locked)
@@ -362,7 +366,7 @@ function normalizeTokenCollectionState(state = {}) {
     const selectedTokenId = tokens.some((t) => t.id === state.selectedTokenId) ? state.selectedTokenId : (tokens[0]?.id || null);
     return { tokens, selectedTokenId };
   }
-  if (state && (state.imageDataUrl || state.visible || state.id)) {
+  if (state && (state.imageHash || state.visible || state.id)) {
     const token = normalizeTokenState(state);
     return { tokens: [token], selectedTokenId: token.id };
   }
@@ -447,10 +451,26 @@ function logFirebaseError(error) {
   console.error("[MapFog Firebase]", error);
 }
 
+// 新圖片：算出雜湊、放進圖片暫存，回傳雜湊給 token 使用。
+function rememberNewImage(dataUrl) {
+  const hash = imageStore.hash(dataUrl);
+  imageStore.remember(hash, dataUrl);
+  return hash;
+}
+
+// room 模式把圖片寫到 images/{雜湊}；一定要在引用它的 token 之前寫，其他人才抓得到。
+function uploadImage(hash, kind) {
+  const dataUrl = imageStore.peek(hash);
+  if (!IS_FIREBASE_ROOM || !firebaseSync || !hash || !dataUrl) return;
+  firebaseSync.putImage(hash, dataUrl, kind).catch(logFirebaseError);
+}
+
 // 以下三個函式是 token 變更唯一的送出口：olroom 走 BroadcastChannel，room 走 Firebase，格式一致。
 function sendTokenAdd(token) {
   if (!token?.id) return;
-  broadcastMessage({ type: "tokenAdd", token: { ...token }, sourceRole: TOKEN_SOURCE_ROLE });
+  // olroom 訊息附上圖片，GM 畫面不必等本機暫存寫完就能顯示。
+  broadcastMessage({ type: "tokenAdd", token: { ...token }, images: imageStore.collect([token.imageHash]), sourceRole: TOKEN_SOURCE_ROLE });
+  uploadImage(token.imageHash, "token");
   firebaseSync?.addToken(token, TOKEN_SOURCE_ROLE).catch(logFirebaseError);
 }
 
@@ -557,13 +577,28 @@ function safeCssEscape(value) {
   return String(value).replace(/["\\]/g, "\\$&");
 }
 
+// 圖片還沒載入時先畫空白 token，等本機暫存或 Firebase 取回後再補上。
+const tokenImageRequests = new Set();
+
+function getTokenImageUrl(token) {
+  const url = imageStore.peek(token.imageHash);
+  if (!url && token.imageHash && !tokenImageRequests.has(token.imageHash)) {
+    tokenImageRequests.add(token.imageHash);
+    imageStore.get(token.imageHash).then((loaded) => {
+      tokenImageRequests.delete(token.imageHash);
+      if (loaded) renderTokens();
+    });
+  }
+  return url;
+}
+
 function renderTokens() {
   if (!tokenLayer) return;
   const visibleIds = new Set();
-  const canShowLayer = Boolean(hasMap && tokenCollectionState.tokens.some((t) => t.visible && t.imageDataUrl));
+  const canShowLayer = Boolean(hasMap && tokenCollectionState.tokens.some((t) => t.visible && t.imageHash));
   tokenLayer.hidden = !canShowLayer;
   for (const token of tokenCollectionState.tokens) {
-    if (!(hasMap && token.visible && token.imageDataUrl)) continue;
+    if (!(hasMap && token.visible && token.imageHash)) continue;
     visibleIds.add(token.id);
     let element = tokenLayer.querySelector(`[data-token-id="${safeCssEscape(token.id)}"]`);
     if (!element) {
@@ -578,7 +613,8 @@ function renderTokens() {
       element.append(image);
       tokenLayer.append(element);
     }
-    const image = element.querySelector("img"); if (image && image.src !== token.imageDataUrl) image.src = token.imageDataUrl;
+    const imageUrl = getTokenImageUrl(token);
+    const image = element.querySelector("img"); if (image && imageUrl && image.src !== imageUrl) image.src = imageUrl;
     element.style.width = `${token.size}px`; element.style.height = `${token.size}px`;
     element.style.transform = `translate(${token.x - token.size / 2}px, ${token.y - token.size / 2}px) rotate(var(--token-rotation, 0deg))`;
     element.title = token.name;
@@ -625,7 +661,7 @@ function loadTokenFromFile(file) {
     try {
       const imageDataUrl = await window.MapFogImageProcessing.createCenteredTokenDataUrl(event.target.result);
       const center = clampTokenPosition(mapCanvas.width / 2, mapCanvas.height / 2);
-      const token = normalizeTokenState({ imageDataUrl, visible: true, x: center.x, y: center.y, order: Date.now() });
+      const token = normalizeTokenState({ imageHash: rememberNewImage(imageDataUrl), visible: true, x: center.x, y: center.y, order: Date.now() });
       setTokenCollectionState({ tokens: [...tokenCollectionState.tokens, token], selectedTokenId: token.id });
       sendTokenAdd(getTokenById(token.id));
     } catch (error) {
@@ -1191,6 +1227,7 @@ syncChannel?.addEventListener("message", (event) => {
   const message = event.data;
   if (!message) return;
 
+  imageStore.rememberAll(message.images);
   // token 的新增、變更、刪除不論來自 GM 或其他玩家畫面都要套用；其餘訊息只聽 GM 的。
   if (message.type === "tokenAdd") applyIncomingTokenEvent({ kind: "add", token: message.token, sourceRole: message.sourceRole });
   if (message.type === "tokenPatch") applyIncomingTokenEvent({ kind: "patch", tokenId: message.tokenId, changes: message.changes, sourceRole: message.sourceRole });
@@ -1250,7 +1287,7 @@ function replaceLocalToken(tokenId, nextToken) {
 }
 
 function addIncomingToken(token) {
-  if (!token?.id || !token.imageDataUrl) return;
+  if (!token?.id || !token.imageHash) return;
   const existing = getTokenById(token.id);
   const incoming = normalizeTokenState({ ...(existing || {}), ...token });
   if (existing) {
