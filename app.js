@@ -146,6 +146,10 @@ const PLAYER_EDITABLE_TOKEN_KEYS = ["x", "y", "size", "shape"];
 // 鎖定後這段時間內，仍接受玩家送來的位置（鎖定前就開始拖、放開才送到的最後一筆）。
 const TOKEN_LOCK_GRACE_MS = 10000;
 const FOG_HISTORY_COMPACT_BATCH_LIMIT = 200;
+const IMAGE_GC_DELAY_MS = 3000;
+// 剛上傳的圖片可能還沒被 token 引用（例如玩家剛傳完圖片、token 還在路上），先保留一段時間再判斷。
+const IMAGE_GC_GRACE_MS = 60000;
+const LOCAL_IMAGE_PRUNE_DELAY_MS = 5000;
 const queryParams = new URLSearchParams(window.location.search);
 const FIREBASE_ROOM_ID = queryParams.get("room") || "";
 const FIREBASE_SYNC_MODE = queryParams.get("sync") === "firebase";
@@ -197,6 +201,15 @@ let viewStatePersistTimer = null;
 let pendingDrawStrokes = [];
 let lastTokenDragSyncAt = 0;
 let currentMapDataUrl = "";
+let currentMapHash = "";
+let mapLoadSeq = 0;
+// room 模式清除沒人用的圖片：GM 要先讀完 Firebase 上的地圖與 token，才知道哪些圖片還在用。
+let remoteImageIndex = {};
+let remoteMapHash = "";
+let remoteMapSeen = false;
+let remoteTokensSynced = false;
+let imageGcTimer = null;
+let localImagePruneTimer = null;
 let protectedTokenId = null;
 let protectedTokenUntil = 0;
 let snapshotApplySeq = 0;
@@ -366,9 +379,10 @@ function readSharedState(key) {
 function createMapState() {
   if (!currentImage) return null;
   return {
+    hash: currentMapHash,
     width: mapCanvas.width,
     height: mapCanvas.height,
-    mapDataUrl: currentMapDataUrl || mapCanvas.toDataURL("image/png")
+    mapDataUrl: currentMapDataUrl
   };
 }
 
@@ -402,7 +416,7 @@ function writeLocalCache(key, value) {
 }
 
 function cacheMapState(mapState) {
-  if (mapState?.mapDataUrl) writeLocalCache(SHARED_MAP_STORAGE_KEY, mapState);
+  if (mapState?.hash) writeLocalCache(SHARED_MAP_STORAGE_KEY, { hash: mapState.hash, width: mapState.width, height: mapState.height });
 }
 
 function cacheFogState(fogState) {
@@ -420,10 +434,13 @@ function persistMapState(mapState = createMapState()) {
   if (!mapState?.mapDataUrl) return null;
 
   cacheMapState(mapState);
-  try {
-    firebaseSync?.saveMapState?.(mapState)?.catch?.(reportRemoteMapSaveError);
-  } catch (error) {
-    reportRemoteMapSaveError(error);
+  if (IS_FIREBASE_ROOM && firebaseSync) {
+    // 先寫圖片、再寫地圖節點：玩家看到新的雜湊時，圖片一定已經在 Firebase 上。
+    uploadImage(mapState.hash, "map");
+    firebaseSync.saveMapState({ hash: mapState.hash, width: mapState.width, height: mapState.height }).catch(reportRemoteMapSaveError);
+    remoteMapHash = mapState.hash;
+    remoteMapSeen = true;
+    scheduleImageGc();
   }
   return mapState;
 }
@@ -476,7 +493,8 @@ function broadcastSnapshot(options = {}) {
     type: "mapUpdate",
     width: snapshot.width,
     height: snapshot.height,
-    mapDataUrl: snapshot.mapDataUrl
+    hash: snapshot.hash,
+    images: imageStore.collect([snapshot.hash])
   });
   broadcastMessage({
     type: "fogUpdate",
@@ -851,6 +869,7 @@ function sendTokenPatch(tokenId, keys) {
 
 function sendTokenRemove(tokenId) {
   if (!tokenId) return;
+  scheduleImageGc();
   broadcastMessage({ type: "tokenRemove", tokenId, sourceRole: TOKEN_SOURCE_ROLE });
   firebaseSync?.removeToken(tokenId).catch(logFirebaseError);
 }
@@ -1662,8 +1681,9 @@ async function readStoredSnapshot() {
   if (IS_FIREBASE_ROOM || !localStore) return null;
 
   const legacySnapshot = await localStore.get(SHARED_STATE_STORAGE_KEY);
-  const mapState = await localStore.get(SHARED_MAP_STORAGE_KEY) || legacySnapshot;
-  if (!mapState?.mapDataUrl) return null;
+  const mapState = await localStore.get(SHARED_MAP_STORAGE_KEY);
+  const mapDataUrl = await imageStore.getLocal(mapState?.hash);
+  if (!mapDataUrl) return null;
 
   const fogState = await localStore.get(SHARED_FOG_STORAGE_KEY);
   const gridState = readSharedState(SHARED_GRID_STORAGE_KEY);
@@ -1676,7 +1696,8 @@ async function readStoredSnapshot() {
     type: "snapshot",
     width: mapState.width,
     height: mapState.height,
-    mapDataUrl: mapState.mapDataUrl,
+    mapHash: mapState.hash,
+    mapDataUrl,
     fogDataUrl: fogMatchesMap ? fogState.fogDataUrl : legacySnapshot?.fogDataUrl,
     gridSettings: gridState || legacySnapshot?.gridSettings,
     tokenState: tokenState || legacySnapshot?.tokenState
@@ -1690,8 +1711,9 @@ async function applyRemoteSnapshot(snapshot, options = {}) {
   const hadMap = Boolean(currentImage);
   const initialWidth = Number(snapshot.width);
   const initialHeight = Number(snapshot.height);
+  const mapHash = snapshot.mapHash || imageStore.hash(snapshot.mapDataUrl);
   const canReuseMap = hadMap
-    && currentMapDataUrl === snapshot.mapDataUrl
+    && currentMapHash === mapHash
     && initialWidth === mapCanvas.width
     && initialHeight === mapCanvas.height;
   const mapImage = canReuseMap ? currentImage : await loadImage(snapshot.mapDataUrl);
@@ -1703,7 +1725,9 @@ async function applyRemoteSnapshot(snapshot, options = {}) {
   if (!canReuseMap) {
     currentImage = mapImage;
     currentMapDataUrl = snapshot.mapDataUrl;
+    currentMapHash = mapHash;
     mapAdjust?.setMapSource(snapshot.mapDataUrl);
+    scheduleLocalImagePrune();
     setCanvasSize(width, height);
     mapCtx.clearRect(0, 0, width, height);
     mapCtx.drawImage(mapImage, 0, 0, width, height);
@@ -1730,7 +1754,7 @@ async function applyRemoteSnapshot(snapshot, options = {}) {
   showCanvases();
   updateGridControls();
   renderTokens();
-  cacheMapState({ width, height, mapDataUrl: snapshot.mapDataUrl });
+  cacheMapState({ hash: mapHash, width, height });
   if (snapshot.fogDataUrl) {
     cacheFogState({ width, height, fogDataUrl: snapshot.fogDataUrl });
   } else {
@@ -1774,8 +1798,12 @@ async function applyRemoteFogState(fogState) {
   });
 }
 
+// 收到地圖 { hash, width, height }：本機已有同一個雜湊的圖片就直接用，沒有才下載。
 async function applyRemoteMapState(mapState, options = {}) {
-  if (!mapState?.mapDataUrl) return;
+  if (!mapState?.hash) return;
+  const loadSeq = ++mapLoadSeq;
+  const mapDataUrl = await imageStore.get(mapState.hash);
+  if (loadSeq !== mapLoadSeq || !mapDataUrl) return;
 
   const pendingFogMatchesMap = pendingRemoteFogState?.fogDataUrl
     && Number(pendingRemoteFogState.width) === Number(mapState.width)
@@ -1789,7 +1817,8 @@ async function applyRemoteMapState(mapState, options = {}) {
       type: "snapshot",
       width: mapState.width,
       height: mapState.height,
-      mapDataUrl: mapState.mapDataUrl,
+      mapHash: mapState.hash,
+      mapDataUrl,
       fogDataUrl: fogState?.fogDataUrl || ""
     }, { ...options, keepGridSettings: true });
   } finally {
@@ -1809,7 +1838,9 @@ async function loadImageFromDataUrl(dataUrl) {
   clearPendingDraws();
   currentImage = img;
   currentMapDataUrl = dataUrl;
+  currentMapHash = rememberNewImage(dataUrl);
   mapAdjust?.setMapSource(dataUrl);
+  scheduleLocalImagePrune();
   viewRotation = 0;
   setCanvasSize(img.naturalWidth, img.naturalHeight);
   mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
@@ -2173,6 +2204,7 @@ syncChannel?.addEventListener("message", (event) => {
   }
 
   if (message?.type === "mapUpdate") {
+    imageStore.rememberAll(message.images);
     applyRemoteMapState(message, { restoreView: !currentImage }).catch((error) => console.error("[MapFog sync]", error));
   }
 
@@ -2247,6 +2279,46 @@ function removeIncomingToken(tokenId) {
   const tokens = tokenCollectionState.tokens.filter((token) => token.id !== tokenId);
   const selectedTokenId = tokenCollectionState.selectedTokenId === tokenId ? (tokens[0]?.id || null) : tokenCollectionState.selectedTokenId;
   setTokenCollectionState({ tokens, selectedTokenId });
+  scheduleImageGc();
+}
+
+function getImageHashesInUse() {
+  return new Set([currentMapHash, remoteMapHash, ...tokenCollectionState.tokens.map((token) => token.imageHash)].filter(Boolean));
+}
+
+function scheduleImageGc(delay = IMAGE_GC_DELAY_MS) {
+  if (!IS_FIREBASE_ROOM) return;
+  window.clearTimeout(imageGcTimer);
+  imageGcTimer = window.setTimeout(collectUnusedImages, delay);
+}
+
+// GM 換地圖、刪 token、迷霧重置或壓縮後，刪掉 Firebase 上已經沒人用的圖片，避免占用存放空間。
+function collectUnusedImages() {
+  imageGcTimer = null;
+  if (!firebaseSync || !remoteMapSeen || !remoteTokensSynced || clearingRoom) return;
+
+  const inUse = getImageHashesInUse();
+  const now = firebaseSync.serverNow();
+  let waitingForGrace = false;
+  const unused = [];
+  for (const [hash, info] of Object.entries(remoteImageIndex)) {
+    if (inUse.has(hash)) continue;
+    if (now - Number(info?.addedAt || 0) < IMAGE_GC_GRACE_MS) waitingForGrace = true;
+    else unused.push(hash);
+  }
+  if (unused.length) {
+    console.info(`[MapFog 圖片] 從 Firebase 刪除 ${unused.length} 張沒人用的圖片`, unused);
+    firebaseSync.deleteImages(unused).catch(logFirebaseError);
+  }
+  if (waitingForGrace) scheduleImageGc(IMAGE_GC_GRACE_MS);
+}
+
+// 本機圖片暫存也只留還在用的；GM 與玩家視窗共用同一份暫存時，雙方暫存畫面用到的都會保留。
+function scheduleLocalImagePrune() {
+  window.clearTimeout(localImagePruneTimer);
+  localImagePruneTimer = window.setTimeout(() => {
+    imageStore.pruneLocal([...getImageHashesInUse()]).catch((error) => console.error("[MapFog 圖片]", error));
+  }, LOCAL_IMAGE_PRUNE_DELAY_MS);
 }
 
 function applyIncomingTokenEvent(event) {
@@ -2281,6 +2353,8 @@ window.addEventListener("storage", (event) => {
 
 function attachFirebaseSync(sync) {
   firebaseSync = sync;
+  // 本機沒有的圖片才向 Firebase 的 images/{雜湊} 下載。
+  imageStore.setRemoteFetcher(sync.getImage);
   refreshFirebaseFogHistory();
 
   sync.onSnapshot((snapshot) => {
@@ -2290,7 +2364,15 @@ function attachFirebaseSync(sync) {
     }, { restoreView: !currentImage }).catch((error) => console.error("[MapFog Firebase]", error));
   });
 
+  sync.onImageIndex((index) => {
+    remoteImageIndex = index;
+    scheduleImageGc();
+  });
+
   sync.onMapState?.((mapState) => {
+    remoteMapSeen = true;
+    remoteMapHash = mapState?.hash || "";
+    scheduleImageGc();
     applyRemoteMapState(mapState, { restoreView: !currentImage }).catch((error) => console.error("[MapFog Firebase]", error));
   });
 
@@ -2319,6 +2401,10 @@ function attachFirebaseSync(sync) {
     onAdd: (token, meta) => applyIncomingTokenEvent({ kind: "add", token, ...meta }),
     onPatch: (tokenId, changes, meta) => applyIncomingTokenEvent({ kind: "patch", tokenId, changes, ...meta }),
     onRemove: (tokenId) => applyIncomingTokenEvent({ kind: "remove", tokenId }),
+    onInitialSync: () => {
+      remoteTokensSynced = true;
+      scheduleImageGc();
+    },
     // 刪除後才晚到的位置更新會留下沒有圖片的殘骸節點，由 GM 清掉。
     onGhost: (key) => sync.removeToken(key).catch(logFirebaseError)
   });

@@ -50,6 +50,10 @@
 
     const app = firebase.apps && firebase.apps.length ? firebase.app() : firebase.initializeApp(firebaseConfig);
     const database = app.database();
+    let serverTimeOffset = 0;
+    database.ref(".info/serverTimeOffset").on("value", (snapshot) => {
+      serverTimeOffset = Number(snapshot.val()) || 0;
+    });
     const roomId = sanitizeRoomId(rawRoomId);
     const clientId = (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     let eventSequence = 0;
@@ -68,13 +72,18 @@
       };
     }
 
-    function listen(path, callback) {
+    // includeEmpty：節點不存在（例如房間被清除）時也通知，callback 會收到 null。
+    function listen(path, callback, options = {}) {
       const reference = roomPath(path);
       reference.on(
         "value",
         (snapshot) => {
           const value = snapshot.val();
-          if (!value || value.sourceClientId === clientId) return;
+          if (!value) {
+            if (options.includeEmpty) callback(null);
+            return;
+          }
+          if (value.sourceClientId === clientId) return;
           callback(value);
         },
         (error) => {
@@ -286,8 +295,9 @@
       saveMapState(mapState) {
         return roomPath("map").set(withMeta(mapState));
       },
+      // 地圖節點只放 { hash, width, height }，圖片本身在 images/{hash}。
       onMapState(callback) {
-        return listen("map", (value) => callback(stripMeta(value)));
+        return listen("map", (value) => callback(value ? stripMeta(value) : null), { includeEmpty: true });
       },
       clearRoomState() {
         return roomPath("").update({
@@ -359,6 +369,25 @@
           [`images/${hash}`]: { dataUrl, kind },
           [`imageIndex/${hash}`]: { kind, bytes: dataUrl.length, addedAt: firebase.database.ServerValue.TIMESTAMP }
         });
+      },
+      onImageIndex(callback) {
+        const reference = roomPath("imageIndex");
+        reference.on("value", (snapshot) => callback(snapshot.val() || {}), logError);
+        return function unsubscribe() {
+          reference.off("value");
+        };
+      },
+      deleteImages(hashes) {
+        const updates = {};
+        for (const hash of hashes) {
+          updates[`images/${hash}`] = null;
+          updates[`imageIndex/${hash}`] = null;
+        }
+        return Object.keys(updates).length ? roomPath("").update(updates) : Promise.resolve();
+      },
+      // 以伺服器時間計算，避免本機時鐘不準時誤判圖片上傳了多久。
+      serverNow() {
+        return Date.now() + serverTimeOffset;
       },
       getImage(hash) {
         return roomPath(`images/${hash}/dataUrl`).once("value").then((snapshot) => {

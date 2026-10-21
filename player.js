@@ -43,6 +43,7 @@ const TOKEN_SYNC_THROTTLE_MS = 300;
 const VIEW_STATE_PERSIST_DELAY_MS = 300;
 const LOCAL_TOKEN_PROTECTION_MS = 2000;
 const TOKEN_SOURCE_ROLE = "player";
+const LOCAL_IMAGE_PRUNE_DELAY_MS = 5000;
 // 圖片與 id 只在新增時送出，其餘欄位可以單獨更新。
 const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order", "locked"];
 const TOKEN_GEOMETRY_KEYS = ["x", "y", "size", "shape"];
@@ -104,6 +105,9 @@ let tokenControlSyncTimer = null;
 let viewStatePersistTimer = null;
 let lastTokenDragSyncAt = 0;
 let currentMapDataUrl = "";
+let currentMapHash = "";
+let mapLoadSeq = 0;
+let localImagePruneTimer = null;
 let protectedTokenId = null;
 let protectedTokenUntil = 0;
 let snapshotApplySeq = 0;
@@ -168,7 +172,16 @@ function writeLocalCache(key, value) {
 }
 
 function cacheMapState(mapState) {
-  if (mapState?.mapDataUrl) writeLocalCache(SHARED_MAP_STORAGE_KEY, mapState);
+  if (mapState?.hash) writeLocalCache(SHARED_MAP_STORAGE_KEY, { hash: mapState.hash, width: mapState.width, height: mapState.height });
+}
+
+// 本機圖片暫存只留還在用的；GM 與玩家視窗共用同一份暫存時，雙方暫存畫面用到的都會保留。
+function scheduleLocalImagePrune() {
+  window.clearTimeout(localImagePruneTimer);
+  localImagePruneTimer = window.setTimeout(() => {
+    const inUse = [currentMapHash, ...tokenCollectionState.tokens.map((token) => token.imageHash)];
+    imageStore.pruneLocal(inUse).catch((error) => console.error("[MapFog 圖片]", error));
+  }, LOCAL_IMAGE_PRUNE_DELAY_MS);
 }
 
 function cacheFogState(fogState) {
@@ -904,8 +917,9 @@ async function applySnapshot(snapshot, options = {}) {
   const applySeq = ++snapshotApplySeq;
   const initialWidth = Number(snapshot.width);
   const initialHeight = Number(snapshot.height);
+  const mapHash = snapshot.mapHash || imageStore.hash(snapshot.mapDataUrl);
   const canReuseMap = hasMap
-    && currentMapDataUrl === snapshot.mapDataUrl
+    && currentMapHash === mapHash
     && initialWidth === mapCanvas.width
     && initialHeight === mapCanvas.height;
   const mapImage = canReuseMap ? null : await loadImage(snapshot.mapDataUrl);
@@ -918,7 +932,9 @@ async function applySnapshot(snapshot, options = {}) {
     mapCtx.clearRect(0, 0, width, height);
     mapCtx.drawImage(mapImage, 0, 0, width, height);
     currentMapDataUrl = snapshot.mapDataUrl;
+    currentMapHash = mapHash;
     mapAdjust?.setMapSource(snapshot.mapDataUrl);
+    scheduleLocalImagePrune();
   }
 
   if (!options.keepGridSettings) setGridSettings(snapshot.gridSettings ?? createDefaultGridSettings());
@@ -941,7 +957,7 @@ async function applySnapshot(snapshot, options = {}) {
   } else {
     renderTokens();
   }
-  cacheMapState({ width, height, mapDataUrl: snapshot.mapDataUrl });
+  cacheMapState({ hash: mapHash, width, height });
   if (snapshot.fogDataUrl) {
     cacheFogState({ width, height, fogDataUrl: snapshot.fogDataUrl });
   } else {
@@ -984,8 +1000,12 @@ async function applyRemoteFogState(fogState) {
   });
 }
 
+// 收到地圖 { hash, width, height }：本機已有同一個雜湊的圖片就直接用，沒有才下載。
 async function applyRemoteMapState(mapState, options = {}) {
-  if (!mapState?.mapDataUrl) return;
+  if (!mapState?.hash) return;
+  const loadSeq = ++mapLoadSeq;
+  const mapDataUrl = await imageStore.get(mapState.hash);
+  if (loadSeq !== mapLoadSeq || !mapDataUrl) return;
 
   const pendingFogMatchesMap = pendingRemoteFogState?.fogDataUrl
     && Number(pendingRemoteFogState.width) === Number(mapState.width)
@@ -999,7 +1019,8 @@ async function applyRemoteMapState(mapState, options = {}) {
       type: "snapshot",
       width: mapState.width,
       height: mapState.height,
-      mapDataUrl: mapState.mapDataUrl,
+      mapHash: mapState.hash,
+      mapDataUrl,
       fogDataUrl: fogState?.fogDataUrl || ""
     }, { ...options, keepGridSettings: true });
   } finally {
@@ -1202,8 +1223,9 @@ async function readStoredSnapshot() {
   if (IS_FIREBASE_ROOM || !localStore) return null;
 
   const legacySnapshot = await localStore.get(SHARED_STATE_STORAGE_KEY);
-  const mapState = await localStore.get(SHARED_MAP_STORAGE_KEY) || legacySnapshot;
-  if (!mapState?.mapDataUrl) return null;
+  const mapState = await localStore.get(SHARED_MAP_STORAGE_KEY);
+  const mapDataUrl = await imageStore.getLocal(mapState?.hash);
+  if (!mapDataUrl) return null;
 
   const fogState = await localStore.get(SHARED_FOG_STORAGE_KEY);
   const gridState = readSharedState(SHARED_GRID_STORAGE_KEY);
@@ -1216,7 +1238,8 @@ async function readStoredSnapshot() {
     type: "snapshot",
     width: mapState.width,
     height: mapState.height,
-    mapDataUrl: mapState.mapDataUrl,
+    mapHash: mapState.hash,
+    mapDataUrl,
     fogDataUrl: fogMatchesMap ? fogState.fogDataUrl : legacySnapshot?.fogDataUrl,
     gridSettings: gridState || legacySnapshot?.gridSettings,
     tokenState: tokenState || legacySnapshot?.tokenState
@@ -1355,6 +1378,8 @@ if (!syncChannel) {
 
 function attachFirebaseSync(sync) {
   firebaseSync = sync;
+  // 本機沒有的圖片才向 Firebase 的 images/{雜湊} 下載。
+  imageStore.setRemoteFetcher(sync.getImage);
   refreshFirebaseFogHistory();
 
   sync.onSnapshot((snapshot) => {
