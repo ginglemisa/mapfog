@@ -129,7 +129,7 @@ const DEFAULT_LOCAL_CACHE_KEYS = [
 const TOKEN_DEFAULT_SIZE = 96;
 const TOKEN_MIN_SIZE = 16;
 const TOKEN_MAX_SIZE = 800;
-const TOKEN_CROP_SIZE = 512;
+const TOKEN_CROP_SIZE = window.MapFogImageProcessing.TOKEN_SIZE;
 const CONTROL_SYNC_DEBOUNCE_MS = 300;
 const TOKEN_SYNC_THROTTLE_MS = 300;
 const SNAPSHOT_PERSIST_DELAY_MS = 1000;
@@ -997,23 +997,6 @@ function setTokensLocked(tokenIds, locked) {
   for (const tokenId of changedIds) sendTokenPatch(tokenId, ["locked"]);
 }
 
-function createCenteredTokenDataUrl(sourceDataUrl) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => {
-      try {
-        const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
-        if (!sourceSize) throw new Error("圖片尺寸無效");
-        const canvas = document.createElement("canvas"); canvas.width = TOKEN_CROP_SIZE; canvas.height = TOKEN_CROP_SIZE;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(image, (image.naturalWidth-sourceSize)/2, (image.naturalHeight-sourceSize)/2, sourceSize, sourceSize, 0, 0, TOKEN_CROP_SIZE, TOKEN_CROP_SIZE);
-        resolve(canvas.toDataURL("image/png"));
-      } catch (error) { reject(error); }
-    };
-    image.onerror = () => reject(new Error("無法讀取這張圖片")); image.src = sourceDataUrl;
-  });
-}
-
 function getInitiativeTokenInitial(name) {
   return name.match(/[A-Za-z\p{Script=Han}]/u)?.[0] || Array.from(name)[0] || "?";
 }
@@ -1057,11 +1040,20 @@ function createInitiativeToken(entry, clientPoint = null) {
   const textY = (TOKEN_CROP_SIZE + metrics.actualBoundingBoxAscent - metrics.actualBoundingBoxDescent) / 2;
   ctx.fillText(label, TOKEN_CROP_SIZE / 2, textY);
 
+  let imageDataUrl;
+  try {
+    imageDataUrl = window.MapFogImageProcessing.encodeCanvas(canvas);
+  } catch (error) {
+    return { error: error.message };
+  } finally {
+    canvas.width = canvas.height = 1;
+  }
+
   const token = normalizeTokenState({
     name,
     initiativeLabel: label,
     initiativeEntryId: typeof entry.id === "string" ? entry.id : "",
-    imageDataUrl: canvas.toDataURL("image/png"),
+    imageDataUrl,
     visible: true,
     x: roundCanvasValue(point.x),
     y: roundCanvasValue(point.y),
@@ -1092,7 +1084,7 @@ function loadTokenFromFile(file) {
   const reader = new FileReader();
   reader.onload = async (event) => {
     try {
-      const imageDataUrl = await createCenteredTokenDataUrl(event.target.result);
+      const imageDataUrl = await window.MapFogImageProcessing.createCenteredTokenDataUrl(event.target.result);
       const center = clampTokenPosition(mapCanvas.width / 2, mapCanvas.height / 2);
       const token = normalizeTokenState({ imageDataUrl, visible: true, x: center.x, y: center.y, order: Date.now(), locked: true });
       setTokenCollectionState({ tokens: [...tokenCollectionState.tokens, token], selectedTokenId: token.id });
