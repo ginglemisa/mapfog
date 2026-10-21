@@ -1,0 +1,14 @@
+# Cloudflare Workers 不上傳的檔案：只發布網頁本身。
+# 隱藏檔與資料夾（.git、.claude、.wrangler、本檔案等）
+.*
+# 套件（Cloudflare 建置時會安裝，單檔可能超過 25 MiB 上限）
+node_modules
+# LAN 伺服器、房間資料與測試，只在 GM 筆電上使用
+lan-data
+server
+test
+lan-server.js
+start-lan-server.bat
+package.json
+package-lock.json
+wrangler.jsonc
