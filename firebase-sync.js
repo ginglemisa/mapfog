@@ -57,7 +57,7 @@
     const roomId = sanitizeRoomId(rawRoomId);
     const clientId = (crypto.randomUUID && crypto.randomUUID()) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     let eventSequence = 0;
-    // 擦霧、迷霧指令、擲骰各自只保留最近幾筆；迷霧的持久保存靠 fogHistory，不靠這些事件。
+    // 擲骰事件只保留最近幾筆；迷霧改存在 fog／fogBatches，不走事件清單。
     const EVENT_KEEP_LIMIT = 100;
 
     function roomPath(path) {
@@ -194,6 +194,10 @@
       };
     }
 
+    function fogBatchKey(seq) {
+      return String(seq).padStart(8, "0");
+    }
+
     function tokenKey(tokenId) {
       return String(tokenId || "").replace(/[.#$/[\]]/g, "-");
     }
@@ -262,38 +266,13 @@
       };
     }
 
-    function normalizeFogHistory(value = {}) {
-      const batches = value.batches && typeof value.batches === "object"
-        ? Object.entries(value.batches)
-            .map(([id, batch]) => ({ id, ...stripMeta(batch || {}) }))
-            .filter((batch) => Array.isArray(batch.strokes))
-            .sort((a, b) => {
-              const timeA = Number(a.createdAt || 0);
-              const timeB = Number(b.createdAt || 0);
-              if (timeA !== timeB) return timeA - timeB;
-              return String(a.id).localeCompare(String(b.id));
-            })
-        : [];
-
-      return {
-        base: value.base === "revealed" || value.base === "checkpoint" ? value.base : "covered",
-        checkpoint: value.checkpoint && typeof value.checkpoint === "object" ? value.checkpoint : null,
-        batches
-      };
-    }
-
     const api = {
       mode: "firebase",
       roomId,
       clientId,
-      saveSnapshot(snapshot) {
-        return roomPath("snapshot").set(withMeta(snapshot));
-      },
-      onSnapshot(callback) {
-        return listen("snapshot", (value) => callback(stripMeta(value)));
-      },
-      saveMapState(mapState) {
-        return roomPath("map").set(withMeta(mapState));
+      // 換地圖時，地圖與新的迷霧版本一起寫入，並刪掉舊的擦霧紀錄。
+      saveMapAndFog(mapState, fogState) {
+        return roomPath("").update({ map: withMeta(mapState), fog: withMeta(fogState), fogBatches: null });
       },
       // 地圖節點只放 { hash, width, height }，圖片本身在 images/{hash}。
       onMapState(callback) {
@@ -304,6 +283,7 @@
           snapshot: null,
           map: null,
           fog: null,
+          fogBatches: null,
           fogHistory: null,
           gridSettings: null,
           initiative: null,
@@ -313,48 +293,28 @@
           imageIndex: null
         });
       },
+      // 迷霧重設、全開或壓縮成 checkpoint：換新的 epoch，舊 epoch 的擦霧紀錄一併刪除。
       saveFogState(fogState) {
-        return roomPath("fog").set(withMeta(fogState));
+        return roomPath("").update({ fog: withMeta(fogState), fogBatches: null });
       },
       onFogState(callback) {
-        return listen("fog", (value) => callback(stripMeta(value)));
+        return listen("fog", (value) => callback(value ? stripMeta(value) : null), { includeEmpty: true });
       },
-      sendDrawBatch(strokes) {
-        return sendEvent("events/drawBatch", { strokes });
+      // 擦霧紀錄放在 fogBatches/{epoch}/{序號}；序號由 GM 依序編號，不依賴裝置時鐘。
+      appendFogBatch(epoch, seq, strokes) {
+        return roomPath(`fogBatches/${epoch}/${fogBatchKey(seq)}`).set(withMeta({ strokes }));
       },
-      onDrawBatch(callback) {
-        return listenEvent("events/drawBatch", (value) => callback(Array.isArray(value.strokes) ? value.strokes : []));
-      },
-      appendFogHistoryBatch(strokes) {
-        if (!Array.isArray(strokes) || !strokes.length) return Promise.resolve();
-        return roomPath("fogHistory/batches").push(withMeta({
-          strokes,
-          createdAt: firebase.database.ServerValue.TIMESTAMP
-        }));
-      },
-      setFogHistoryBase(base) {
-        return roomPath("fogHistory").set(withMeta({
-          base: base === "revealed" ? "revealed" : "covered",
-          batches: null
-        }));
-      },
-      compactFogHistory(checkpoint) {
-        return roomPath("fogHistory").set(withMeta({
-          base: "checkpoint",
-          checkpoint,
-          batches: null
-        }));
-      },
-      loadFogHistory() {
-        return roomPath("fogHistory").once("value").then((snapshot) => normalizeFogHistory(snapshot.val() || {}));
-      },
-      sendFogCommand(command) {
-        return sendEvent("events/fogCommand", { command });
-      },
-      onFogCommand(callback) {
-        return listenEvent("events/fogCommand", (value) => {
-          if (value.command) callback(value.command);
-        });
+      onFogBatches(epoch, afterSeq, callback) {
+        let query = roomPath(`fogBatches/${epoch}`).orderByKey();
+        if (afterSeq > 0) query = query.startAfter(fogBatchKey(afterSeq));
+        query.on("child_added", (child) => {
+          const value = child.val();
+          if (!value || value.sourceClientId === clientId) return;
+          callback(Number(child.key), Array.isArray(value.strokes) ? value.strokes : []);
+        }, logError);
+        return function unsubscribe() {
+          query.off("child_added");
+        };
       },
       sendGridSettings(gridSettings) {
         return roomPath("gridSettings").set(withMeta(gridSettings));

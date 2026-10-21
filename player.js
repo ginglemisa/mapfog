@@ -112,9 +112,13 @@ let protectedTokenId = null;
 let protectedTokenUntil = 0;
 let snapshotApplySeq = 0;
 let pendingRemoteFogState = null;
-let pendingFirebaseFogHistory = null;
 let applyingRemoteMapState = false;
-let firebaseFogHistoryApplySeq = 0;
+// room 模式的迷霧進度：epoch 換了代表重設、全開或壓縮；seq 是已送出／已套用的最後一筆擦霧序號。
+let fogSync = createEmptyFogSync();
+let pendingRemoteFogSync = null;
+let fogSyncApplySeq = 0;
+let fogBatchListenEpoch = "";
+let stopFogBatchListener = null;
 let suppressBeforeUnloadPersist = false;
 // 本機暫存還原完成前收到的 token 更新先排隊，避免被還原的舊資料蓋掉。
 let localRestorePending = true;
@@ -928,6 +932,9 @@ async function applySnapshot(snapshot, options = {}) {
   const height = initialHeight || mapImage.naturalHeight;
 
   if (!canReuseMap) {
+    // 換了地圖，舊地圖的迷霧進度不再適用，等這張地圖的迷霧狀態送來再套用。
+    stopFogBatches();
+    fogSync = createEmptyFogSync();
     setCanvasSize(width, height);
     mapCtx.clearRect(0, 0, width, height);
     mapCtx.drawImage(mapImage, 0, 0, width, height);
@@ -963,7 +970,7 @@ async function applySnapshot(snapshot, options = {}) {
   } else {
     cacheFogState({ width, height, fogDataUrl: fogCanvas.toDataURL("image/png") });
   }
-  applyPendingFirebaseFogHistory();
+  applyPendingRemoteFogSync();
 
   if (options.restoreView && applyStoredViewState()) return;
   if (canReuseMap && options.preserveView !== false) {
@@ -1045,56 +1052,77 @@ function applyFogHistoryBase(base) {
   }
 }
 
-async function applyFogHistoryCheckpoint(checkpoint) {
-  if (!checkpoint?.fogDataUrl) {
-    return null;
-  }
-
-  return loadImage(checkpoint.fogDataUrl);
+function createEmptyFogSync() {
+  return { epoch: "", seq: 0, base: "covered", checkpointHash: "", mapHash: "" };
 }
 
-async function applyFirebaseFogHistory(history) {
-  if (!IS_FIREBASE_ROOM || !history) return;
+function paintFogBase(base, checkpointImage = null) {
+  if (base === "checkpoint" && checkpointImage) {
+    fogCtx.globalCompositeOperation = "source-over";
+    fogCtx.globalAlpha = 1;
+    fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
+    fogCtx.drawImage(checkpointImage, 0, 0, fogCanvas.width, fogCanvas.height);
+    return;
+  }
+  applyFogHistoryBase(base === "revealed" ? "revealed" : "covered");
+}
 
-  if (!hasMap) {
-    pendingFirebaseFogHistory = history;
+// 收到 Firebase 的迷霧狀態 { epoch, base, checkpointHash, mapHash }：
+// 同一個 epoch 只要接著讀之後的擦霧；epoch 不同代表 GM 重設、全開或壓縮過，要從底圖重畫。
+async function applyRemoteFogSync(remoteFog) {
+  if (!remoteFog?.epoch) return;
+  if (!hasMap || remoteFog.mapHash !== currentMapHash) {
+    pendingRemoteFogSync = remoteFog;
+    return;
+  }
+  pendingRemoteFogSync = null;
+  if (remoteFog.epoch === fogSync.epoch) {
+    listenFogBatches();
     return;
   }
 
-  const applySeq = ++firebaseFogHistoryApplySeq;
-  pendingFirebaseFogHistory = null;
-
-  if (history.base === "checkpoint") {
-    const fogImage = await applyFogHistoryCheckpoint(history.checkpoint);
-    if (applySeq !== firebaseFogHistoryApplySeq) return;
-    if (fogImage) {
-      fogCtx.globalCompositeOperation = "source-over";
-      fogCtx.globalAlpha = 1;
-      fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
-      fogCtx.drawImage(fogImage, 0, 0, fogCanvas.width, fogCanvas.height);
-    } else {
-      applyFogHistoryBase("covered");
-    }
-  } else {
-    applyFogHistoryBase(history.base);
+  const applySeq = ++fogSyncApplySeq;
+  let checkpointImage = null;
+  if (remoteFog.base === "checkpoint") {
+    const dataUrl = await imageStore.get(remoteFog.checkpointHash);
+    checkpointImage = dataUrl ? await loadImage(dataUrl) : null;
+    if (applySeq !== fogSyncApplySeq || remoteFog.mapHash !== currentMapHash) return;
   }
 
-  const batches = Array.isArray(history.batches) ? history.batches : [];
-  for (const batch of batches) {
-    drawBatch(batch.strokes);
-  }
+  stopFogBatches();
+  paintFogBase(remoteFog.base, checkpointImage);
+  fogSync = {
+    epoch: remoteFog.epoch,
+    seq: 0,
+    base: remoteFog.base,
+    checkpointHash: remoteFog.checkpointHash || "",
+    mapHash: remoteFog.mapHash
+  };
+  listenFogBatches();
 }
 
-function applyPendingFirebaseFogHistory() {
-  if (!pendingFirebaseFogHistory || !hasMap) return;
-  applyFirebaseFogHistory(pendingFirebaseFogHistory).catch((error) => console.error("[MapFog Firebase]", error));
+function applyPendingRemoteFogSync() {
+  if (!pendingRemoteFogSync) return;
+  applyRemoteFogSync(pendingRemoteFogSync).catch((error) => console.error("[MapFog Firebase]", error));
 }
 
-function refreshFirebaseFogHistory() {
-  if (!IS_FIREBASE_ROOM) return;
-  firebaseSync?.loadFogHistory?.()
-    .then((history) => applyFirebaseFogHistory(history))
-    .catch((error) => console.error("[MapFog Firebase]", error));
+// 從目前進度之後開始聽擦霧紀錄；斷線再久，重新連線後 Firebase 會把漏掉的依序補上。
+function listenFogBatches() {
+  if (!IS_FIREBASE_ROOM || !firebaseSync || !fogSync.epoch || fogBatchListenEpoch === fogSync.epoch) return;
+  stopFogBatches();
+  const epoch = fogSync.epoch;
+  fogBatchListenEpoch = epoch;
+  stopFogBatchListener = firebaseSync.onFogBatches(epoch, fogSync.seq, (seq, strokes) => {
+    if (fogSync.epoch !== epoch || seq <= fogSync.seq) return;
+    fogSync.seq = seq;
+    drawBatch(strokes);
+  });
+}
+
+function stopFogBatches() {
+  stopFogBatchListener?.();
+  stopFogBatchListener = null;
+  fogBatchListenEpoch = "";
 }
 
 function resetFog() {
@@ -1380,33 +1408,13 @@ function attachFirebaseSync(sync) {
   firebaseSync = sync;
   // 本機沒有的圖片才向 Firebase 的 images/{雜湊} 下載。
   imageStore.setRemoteFetcher(sync.getImage);
-  refreshFirebaseFogHistory();
-
-  sync.onSnapshot((snapshot) => {
-    applySnapshot({
-      ...snapshot,
-      fogDataUrl: IS_FIREBASE_ROOM ? "" : snapshot.fogDataUrl
-    }, { restoreView: !hasMap }).catch((error) => console.error("[MapFog Firebase]", error));
-  });
 
   sync.onMapState?.((mapState) => {
     applyRemoteMapState(mapState, { restoreView: !hasMap }).catch((error) => console.error("[MapFog Firebase]", error));
   });
 
-  if (!IS_FIREBASE_ROOM) sync.onFogState?.((fogState) => {
-    applyRemoteFogState(fogState).catch((error) => console.error("[MapFog Firebase]", error));
-  });
-
-  sync.onDrawBatch((strokes) => {
-    drawBatch(strokes);
-  });
-
-  sync.onFogCommand((command) => {
-    firebaseFogHistoryApplySeq += 1;
-    if (command === "resetFog") resetFog();
-    if (command === "revealAllFog") revealAllFog();
-    cacheCurrentFogState();
-    pendingFirebaseFogHistory = null;
+  sync.onFogState((remoteFog) => {
+    applyRemoteFogSync(remoteFog).catch((error) => console.error("[MapFog Firebase]", error));
   });
 
   sync.onGridSettings((nextGridSettings) => {
