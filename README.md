@@ -536,4 +536,6 @@ GM 頁面的布局（電腦版與平板相同）：
 
 ## 部署與安全
 
-這個專案是純前端靜態網站；若自行部署並啟用 Firebase 同步，請先檢查資料庫規則與房間存取權限。前端 Firebase `apiKey` 並不等同私密伺服器金鑰，也不能取代資料庫安全規則。
+這個專案是純前端靜態網站；若自行部署並啟用 Firebase 同步，請先檢查資料庫規則與房間存取權限。
+
+Cloudflare Workers 的部署設定在 `wrangler.jsonc`（整個資料夾當靜態網站發布）。`.assetsignore` 排除 `node_modules`、LAN 伺服器（`server/`、`lan-server.js`）、測試與隱藏檔；Cloudflare 建置時會先依 `package.json` 安裝套件，沒有排除的話 `node_modules` 裡的大檔案會超過 Workers 單檔 25 MiB 上限而部署失敗。新增網頁要用的檔案不必改設定，新增只給伺服器用的檔案時再加進 `.assetsignore`。前端 Firebase `apiKey` 並不等同私密伺服器金鑰，也不能取代資料庫安全規則。

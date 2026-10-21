@@ -1,0 +1,12 @@
+// Cloudflare Workers 部署設定：整個專案資料夾當成靜態網站，不需要建置步驟。
+// 不屬於網頁的檔案（node_modules、LAN 伺服器、測試）由 .assetsignore 排除。
+{
+  "name": "mapfog",
+  "compatibility_date": "2026-10-01",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "."
+  }
+}
