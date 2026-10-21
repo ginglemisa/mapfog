@@ -100,6 +100,15 @@
     }
   }
 
+  async function keys(prefix) {
+    try {
+      return (await runStore("readonly", (store) => store.getAllKeys(prefixRange(prefix)))) || [];
+    } catch (error) {
+      console.error("[MapFog local store]", error);
+      return [];
+    }
+  }
+
   async function removeByPrefix(prefix) {
     try {
       const keys = await runStore("readonly", (store) => store.getAllKeys(prefixRange(prefix)));
@@ -112,5 +121,5 @@
     }
   }
 
-  window.MapFogLocalStore = { get, set, remove, removeByPrefix };
+  window.MapFogLocalStore = { get, set, remove, keys, removeByPrefix };
 })();
