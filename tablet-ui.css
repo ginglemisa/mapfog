@@ -9,17 +9,24 @@
   scrollbar-width: none;
   touch-action: pan-x;
 }
-/* 左上靠左排，寬度讓出右上那組；右上那組靠右，不捲動。 */
+/* 左上、右上同時只展開一組（tablet-ui.js）。展開的那組疊在上面，寬度停在另一組的箭頭前面；
+   放不下就橫向捲動，自己的箭頭固定在端點不會被捲走。 */
 .gm-page.tablet-layout #floatingToolbar {
   left: max(10px, env(safe-area-inset-left));
-  max-width: calc(100vw - 20px - var(--side-toolbar-space, 0px));
+  max-width: var(--tablet-left-toolbar-max, calc(100vw - 20px - var(--side-toolbar-space, 0px)));
 }
 .gm-page.tablet-layout #sideToolbar {
   left: auto;
   right: max(10px, env(safe-area-inset-right));
-  max-width: none;
-  overflow: visible;
+  max-width: var(--tablet-right-toolbar-max, none);
 }
+.gm-page.tablet-layout .floating-toolbar:not(.collapsed) { z-index: 31; }
+.gm-page.tablet-layout .floating-toolbar > .toolbar-toggle {
+  position: sticky;
+  z-index: 1;
+}
+.gm-page.tablet-layout #floatingToolbar > .toolbar-toggle { left: 0; }
+.gm-page.tablet-layout #sideToolbar > .toolbar-toggle { right: 0; }
 .gm-page.tablet-layout .floating-toolbar::-webkit-scrollbar { display: none; }
 .gm-page.tablet-layout .floating-toolbar .tool-button {
   width: 44px;
@@ -32,8 +39,6 @@
   top: max(10px, env(safe-area-inset-top));
   left: max(10px, env(safe-area-inset-left));
   max-width: none;
-  gap: 5px;
-  padding: 0;
   overflow: visible;
 }
 .gm-page.tablet-layout #sideToolbar.collapsed {

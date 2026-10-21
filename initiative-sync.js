@@ -366,12 +366,12 @@
     button.setAttribute("aria-expanded", "true");
     button.innerHTML = `
       <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M8 6h13"/>
-        <path d="M8 12h13"/>
-        <path d="M8 18h13"/>
-        <path d="M3 6h1"/>
-        <path d="M3 12h1"/>
-        <path d="M3 18h1"/>
+        <path d="M10 6h10"/>
+        <path d="M10 12h10"/>
+        <path d="M10 18h10"/>
+        <path d="M3.5 3.8L7 6l-3.5 2.2z" fill="currentColor"/>
+        <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/>
+        <circle cx="5" cy="18" r="1" fill="currentColor" stroke="none"/>
       </svg>
     `;
     // GM 放在右上角遊戲工具列：Token、先攻、骰子、收合按鈕。玩家頁放在工具列最右邊的收合按鈕前面。
