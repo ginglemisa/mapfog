@@ -1,8 +1,5 @@
 const DEFAULT_SYNC_CHANNEL_NAME = "mapfog.sync.v1";
 const CONTROL_CHANNEL_NAME = "mapfog.control.v1";
-const DEFAULT_SHARED_STATE_STORAGE_KEY = "mapfog.shared.state";
-const DEFAULT_SHARED_MAP_STORAGE_KEY = "mapfog.shared.map.v1";
-const DEFAULT_SHARED_FOG_STORAGE_KEY = "mapfog.shared.fog.v1";
 const DEFAULT_SHARED_GRID_STORAGE_KEY = "mapfog.shared.grid.v1";
 
 const viewport = document.getElementById("viewport");
@@ -30,8 +27,6 @@ const mapCtx = mapCanvas.getContext("2d");
 const gridCtx = gridCanvas.getContext("2d");
 const fogCtx = fogCanvas.getContext("2d");
 
-const DEFAULT_TOKEN_STATE_STORAGE_KEY = "mapfog.tokens.state.v2";
-const LEGACY_TOKEN_STATE_STORAGE_KEY = "mapfog.token.state";
 const DEFAULT_PLAYER_VIEW_STATE_STORAGE_KEY = "mapfog.view.player.v1";
 const DEFAULT_PLAYER_MAP_ADJUST_STORAGE_KEY = "mapfog.mapAdjust.player.v1";
 const OLROOM_STORAGE_PREFIX = "mapfog.olroom.";
@@ -60,11 +55,7 @@ const STORAGE_PREFIX = IS_FIREBASE_ROOM
   : (IS_OFFLINE_ROOM ? `${OLROOM_STORAGE_PREFIX}${OFFLINE_ROOM_KEY}.` : "");
 const USE_NAMESPACED_STORAGE_KEYS = Boolean(STORAGE_PREFIX);
 const SYNC_CHANNEL_NAME = getSyncChannelName();
-const SHARED_STATE_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}shared.state.v1` : DEFAULT_SHARED_STATE_STORAGE_KEY;
-const SHARED_MAP_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}map.v1` : DEFAULT_SHARED_MAP_STORAGE_KEY;
-const SHARED_FOG_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}fog.v1` : DEFAULT_SHARED_FOG_STORAGE_KEY;
 const SHARED_GRID_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}grid.v1` : DEFAULT_SHARED_GRID_STORAGE_KEY;
-const TOKEN_STATE_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}tokens.v2` : DEFAULT_TOKEN_STATE_STORAGE_KEY;
 const PLAYER_VIEW_STATE_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}playerView.v1` : DEFAULT_PLAYER_VIEW_STATE_STORAGE_KEY;
 const PLAYER_MAP_ADJUST_STORAGE_KEY = USE_NAMESPACED_STORAGE_KEYS ? `${STORAGE_PREFIX}playerMapAdjust.v1` : DEFAULT_PLAYER_MAP_ADJUST_STORAGE_KEY;
 // Firebase room 已經同步一切；同機再走 BroadcastChannel 會讓柔邊擦霧被套用兩次。
@@ -75,6 +66,11 @@ const localStore = window.MapFogLocalStore;
 // 本機暫存的名稱開頭：room／olroom 各自分開，沒有房間參數的預設畫面用 mapfog.shared.。
 const LOCAL_CACHE_PREFIX = STORAGE_PREFIX || "mapfog.shared.";
 const imageStore = window.MapFogImageStore.create({ prefix: LOCAL_CACHE_PREFIX, remote: IS_FIREBASE_ROOM });
+// 玩家最後看到的畫面：地圖雜湊、迷霧畫布與進度、token、格線。開頁時先顯示它，再跟 GM／Firebase 比對。
+const SCENE_CACHE_KEY = `${LOCAL_CACHE_PREFIX}scene.player.v3`;
+// 同一台電腦的 GM 畫面暫存；玩家自己的暫存比較舊或沒有時改用它（例如 GM 先準備好 olroom 地圖）。
+const GM_SCENE_CACHE_KEY = `${LOCAL_CACHE_PREFIX}scene.gm.v3`;
+const SCENE_CACHE_DELAY_MS = 1500;
 // 地圖調整只存在這個玩家的瀏覽器，不會同步給 GM 或其他玩家。
 const mapAdjust = window.MapFogMapAdjust?.create({
   canvas: mapCanvas,
@@ -108,6 +104,11 @@ let currentMapDataUrl = "";
 let currentMapHash = "";
 let mapLoadSeq = 0;
 let localImagePruneTimer = null;
+let sceneCacheTimer = null;
+let fogCacheDataUrl = "";
+let fogCacheDirty = true;
+// Firebase SDK 還沒載入（例如離線開啟）時玩家對 token 的修改，連上後補送。
+const offlineChanges = { added: new Set(), patched: new Set(), removed: new Set() };
 let protectedTokenId = null;
 let protectedTokenUntil = 0;
 let snapshotApplySeq = 0;
@@ -169,14 +170,77 @@ function readSharedState(key) {
   }
 }
 
-function writeLocalCache(key, value) {
-  // Firebase room 不從本機暫存還原，寫了只會占空間。
-  if (IS_FIREBASE_ROOM || !localStore) return;
-  localStore.set(key, value);
+function isWaitingForFirebase() {
+  return IS_FIREBASE_ROOM && !firebaseSync;
 }
 
-function cacheMapState(mapState) {
-  if (mapState?.hash) writeLocalCache(SHARED_MAP_STORAGE_KEY, { hash: mapState.hash, width: mapState.width, height: mapState.height });
+function scheduleSceneCache() {
+  if (!localStore || sceneCacheTimer !== null) return;
+  sceneCacheTimer = window.setTimeout(() => {
+    sceneCacheTimer = null;
+    writeSceneCache();
+  }, SCENE_CACHE_DELAY_MS);
+}
+
+function markFogChanged() {
+  fogCacheDirty = true;
+  scheduleSceneCache();
+}
+
+// 迷霧畫布與 fogSync 進度在同一刻記下，重新開啟時才能從正確的位置接著讀擦霧紀錄。
+function writeSceneCache(force = false) {
+  if (!localStore || suppressBeforeUnloadPersist) return;
+  if (!force && draggingTokenId) {
+    scheduleSceneCache();
+    return;
+  }
+  if (hasMap && (fogCacheDirty || !fogCacheDataUrl)) {
+    fogCacheDataUrl = fogCanvas.toDataURL("image/png");
+    fogCacheDirty = false;
+  }
+  localStore.set(SCENE_CACHE_KEY, {
+    map: hasMap ? { hash: currentMapHash, width: mapCanvas.width, height: mapCanvas.height } : null,
+    fog: hasMap ? { dataUrl: fogCacheDataUrl, width: fogCanvas.width, height: fogCanvas.height, ...fogSync } : null,
+    grid: { ...gridSettings },
+    tokens: tokenCollectionState.tokens,
+    offlineChanges: {
+      added: [...offlineChanges.added],
+      patched: [...offlineChanges.patched],
+      removed: [...offlineChanges.removed]
+    },
+    savedAt: Date.now()
+  });
+}
+
+function restoreOfflineChanges(saved) {
+  if (!IS_FIREBASE_ROOM || !saved) return;
+  (saved.added || []).forEach((tokenId) => offlineChanges.added.add(tokenId));
+  (saved.patched || []).forEach((tokenId) => offlineChanges.patched.add(tokenId));
+  (saved.removed || []).forEach((tokenId) => offlineChanges.removed.add(tokenId));
+}
+
+// 連上 Firebase 時先送出 SDK 載入前的修改；鎖定與否仍由 GM 判斷，不接受的會被 GM 改回去。
+function flushOfflineChanges() {
+  for (const tokenId of offlineChanges.removed) firebaseSync.removeToken(tokenId).catch(logFirebaseError);
+  for (const tokenId of offlineChanges.added) {
+    const token = getTokenById(tokenId);
+    if (!token) continue;
+    uploadImage(token.imageHash, "token");
+    firebaseSync.addToken(token, TOKEN_SOURCE_ROLE).catch(logFirebaseError);
+  }
+  for (const tokenId of offlineChanges.patched) {
+    const token = getTokenById(tokenId);
+    if (token) firebaseSync.updateToken(tokenId, pickTokenGeometry(token), TOKEN_SOURCE_ROLE).catch(logFirebaseError);
+  }
+
+  const hadChanges = offlineChanges.added.size || offlineChanges.patched.size || offlineChanges.removed.size;
+  offlineChanges.added.clear();
+  offlineChanges.patched.clear();
+  offlineChanges.removed.clear();
+  if (hadChanges) {
+    console.info("[MapFog 暫存] 已送出離線期間的修改");
+    scheduleSceneCache();
+  }
 }
 
 // 本機圖片暫存只留還在用的；GM 與玩家視窗共用同一份暫存時，雙方暫存畫面用到的都會保留。
@@ -188,21 +252,9 @@ function scheduleLocalImagePrune() {
   }, LOCAL_IMAGE_PRUNE_DELAY_MS);
 }
 
-function cacheFogState(fogState) {
-  if (fogState?.fogDataUrl) writeLocalCache(SHARED_FOG_STORAGE_KEY, fogState);
-}
-
 function cacheGridSettings() {
   writeSharedState(SHARED_GRID_STORAGE_KEY, { ...gridSettings });
-}
-
-function cacheCurrentFogState() {
-  if (!hasMap) return;
-  cacheFogState({
-    width: fogCanvas.width,
-    height: fogCanvas.height,
-    fogDataUrl: fogCanvas.toDataURL("image/png")
-  });
+  scheduleSceneCache();
 }
 
 function createDefaultGridSettings() {
@@ -432,18 +484,6 @@ function preserveProtectedTokenState(nextState) {
   };
 }
 
-async function readStoredTokenState() {
-  if (IS_FIREBASE_ROOM || !localStore) return null;
-
-  return await localStore.get(TOKEN_STATE_STORAGE_KEY)
-    || (IS_OFFLINE_ROOM ? null : await localStore.get(LEGACY_TOKEN_STATE_STORAGE_KEY));
-}
-
-function persistTokenState() {
-  // 共用暫存只放 token 本身；選取狀態只留在這個畫面。
-  writeLocalCache(TOKEN_STATE_STORAGE_KEY, { tokens: tokenCollectionState.tokens });
-}
-
 function broadcastMessage(message) {
   syncChannel?.postMessage({ ...message, source: "player" });
 }
@@ -485,6 +525,7 @@ function uploadImage(hash, kind) {
 // 以下三個函式是 token 變更唯一的送出口：olroom 走 BroadcastChannel，room 走 Firebase，格式一致。
 function sendTokenAdd(token) {
   if (!token?.id) return;
+  if (isWaitingForFirebase()) offlineChanges.added.add(token.id);
   // olroom 訊息附上圖片，GM 畫面不必等本機暫存寫完就能顯示。
   broadcastMessage({ type: "tokenAdd", token: { ...token }, images: imageStore.collect([token.imageHash]), sourceRole: TOKEN_SOURCE_ROLE });
   uploadImage(token.imageHash, "token");
@@ -496,12 +537,18 @@ function sendTokenPatch(tokenId, keys) {
   if (!token) return;
   const changes = pickTokenFields(token, keys.filter((key) => TOKEN_SYNC_KEYS.includes(key)));
   if (!Object.keys(changes).length) return;
+  if (isWaitingForFirebase() && !offlineChanges.added.has(tokenId)) offlineChanges.patched.add(tokenId);
   broadcastMessage({ type: "tokenPatch", tokenId, changes, sourceRole: TOKEN_SOURCE_ROLE });
   firebaseSync?.updateToken(tokenId, changes, TOKEN_SOURCE_ROLE).catch(logFirebaseError);
 }
 
 function sendTokenRemove(tokenId) {
   if (!tokenId) return;
+  if (isWaitingForFirebase()) {
+    offlineChanges.added.delete(tokenId);
+    offlineChanges.patched.delete(tokenId);
+    offlineChanges.removed.add(tokenId);
+  }
   broadcastMessage({ type: "tokenRemove", tokenId, sourceRole: TOKEN_SOURCE_ROLE });
   firebaseSync?.removeToken(tokenId).catch(logFirebaseError);
 }
@@ -539,7 +586,7 @@ function flushTokenControlSync(tokenId, keys) {
     tokenControlSyncTimer = null;
   }
 
-  persistTokenState();
+  scheduleSceneCache();
   if (tokenId && !getTokenById(tokenId)?.locked) sendTokenPatch(tokenId, keys);
 }
 
@@ -647,7 +694,8 @@ function setTokenCollectionState(nextState, options = {}) {
   tokenCollectionState = options.merge ? mergeTokenCollectionState(nextState) : normalizeTokenCollectionState(nextState);
   if (options.clampPosition !== false) tokenCollectionState.tokens = tokenCollectionState.tokens.map((t) => ({ ...t, ...clampTokenPosition(t.x, t.y) }));
   renderTokens();
-  if (options.persist !== false) persistTokenState();
+  // 玩家暫存只給自己的畫面還原用，收到的變化也一起記下。
+  scheduleSceneCache();
 }
 
 function setTokenState(nextState, options = {}) {
@@ -768,7 +816,7 @@ function endTokenDrag(event) {
 
   draggingTokenId = null;
   protectLocalToken(tokenId);
-  persistTokenState();
+  scheduleSceneCache();
   // 確保放開時再送出一次最終位置，即使最後一個 pointermove 沒有成功送出。
   flushTokenDragSync(tokenId, true);
 }
@@ -959,17 +1007,11 @@ async function applySnapshot(snapshot, options = {}) {
   canvasHolder.hidden = false;
 
   if (snapshot.tokenState) {
-    // 收到的狀態不寫回本機暫存：GM 會自己保存，玩家寫回只會讓舊資料蓋掉 GM。
     setTokenCollectionState(preserveProtectedTokenState(snapshot.tokenState), { sync: false, persist: false });
   } else {
     renderTokens();
   }
-  cacheMapState({ hash: mapHash, width, height });
-  if (snapshot.fogDataUrl) {
-    cacheFogState({ width, height, fogDataUrl: snapshot.fogDataUrl });
-  } else {
-    cacheFogState({ width, height, fogDataUrl: fogCanvas.toDataURL("image/png") });
-  }
+  markFogChanged();
   applyPendingRemoteFogSync();
 
   if (options.restoreView && applyStoredViewState()) return;
@@ -1000,16 +1042,18 @@ async function applyRemoteFogState(fogState) {
 
   fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
   fogCtx.drawImage(fogImage, 0, 0, fogCanvas.width, fogCanvas.height);
-  cacheFogState({
-    width: fogCanvas.width,
-    height: fogCanvas.height,
-    fogDataUrl: fogState.fogDataUrl
-  });
+  markFogChanged();
 }
 
 // 收到地圖 { hash, width, height }：本機已有同一個雜湊的圖片就直接用，沒有才下載。
 async function applyRemoteMapState(mapState, options = {}) {
   if (!mapState?.hash) return;
+  // 和畫面上（例如本機暫存）是同一張地圖：不重畫，保留迷霧，只等迷霧進度比對。
+  if (hasMap && mapState.hash === currentMapHash
+    && Number(mapState.width) === mapCanvas.width && Number(mapState.height) === mapCanvas.height) {
+    applyPendingRemoteFogSync();
+    return;
+  }
   const loadSeq = ++mapLoadSeq;
   const mapDataUrl = await imageStore.get(mapState.hash);
   if (loadSeq !== mapLoadSeq || !mapDataUrl) return;
@@ -1098,6 +1142,7 @@ async function applyRemoteFogSync(remoteFog) {
     checkpointHash: remoteFog.checkpointHash || "",
     mapHash: remoteFog.mapHash
   };
+  markFogChanged();
   listenFogBatches();
 }
 
@@ -1204,6 +1249,7 @@ function drawBatch(strokes) {
       drawAt(stroke.x, stroke.y, stroke);
     }
   }
+  markFogChanged();
 }
 
 function rotateViewClockwise() {
@@ -1247,33 +1293,6 @@ function touchMidpoint(t1, t2) {
   };
 }
 
-async function readStoredSnapshot() {
-  if (IS_FIREBASE_ROOM || !localStore) return null;
-
-  const legacySnapshot = await localStore.get(SHARED_STATE_STORAGE_KEY);
-  const mapState = await localStore.get(SHARED_MAP_STORAGE_KEY);
-  const mapDataUrl = await imageStore.getLocal(mapState?.hash);
-  if (!mapDataUrl) return null;
-
-  const fogState = await localStore.get(SHARED_FOG_STORAGE_KEY);
-  const gridState = readSharedState(SHARED_GRID_STORAGE_KEY);
-  const tokenState = await readStoredTokenState();
-  const fogMatchesMap = fogState?.fogDataUrl
-    && Number(fogState.width) === Number(mapState.width)
-    && Number(fogState.height) === Number(mapState.height);
-
-  return {
-    type: "snapshot",
-    width: mapState.width,
-    height: mapState.height,
-    mapHash: mapState.hash,
-    mapDataUrl,
-    fogDataUrl: fogMatchesMap ? fogState.fogDataUrl : legacySnapshot?.fogDataUrl,
-    gridSettings: gridState || legacySnapshot?.gridSettings,
-    tokenState: tokenState || legacySnapshot?.tokenState
-  };
-}
-
 syncChannel?.addEventListener("message", (event) => {
   const message = event.data;
   if (!message) return;
@@ -1292,11 +1311,11 @@ syncChannel?.addEventListener("message", (event) => {
   if (message.type === "drawBatch") drawBatch(message.strokes);
   if (message.type === "resetFog") {
     resetFog();
-    cacheCurrentFogState();
+    markFogChanged();
   }
   if (message.type === "revealAllFog") {
     revealAllFog();
-    cacheCurrentFogState();
+    markFogChanged();
   }
   if (message.type === "gridUpdate") setGridSettings(message.gridSettings);
   if (message.type === "tokenState") applyIncomingTokenEvent({ kind: "state", tokenState: message.tokenState });
@@ -1326,7 +1345,6 @@ function switchToOfflineRoom(olroom) {
   window.location.href = url.toString();
 }
 
-// 收到的狀態不寫回本機暫存：GM 會自己保存，玩家寫回只會讓舊資料蓋掉 GM。
 function applyIncomingTokenState(tokenState) {
   const nextState = { ...preserveProtectedTokenState(tokenState), selectedTokenId: tokenCollectionState.selectedTokenId };
   setTokenCollectionState(nextState, { persist: false, merge: true });
@@ -1404,12 +1422,36 @@ if (!syncChannel) {
   });
 }
 
+// 暫存畫面裡有、Firebase 上已被刪除的 token 直接移除。
+function removeTokensMissingFromRoom(tokenIds) {
+  const present = new Set(tokenIds);
+  const tokens = tokenCollectionState.tokens.filter((token) => present.has(token.id));
+  if (tokens.length === tokenCollectionState.tokens.length) return;
+  const selectedTokenId = tokens.some((token) => token.id === tokenCollectionState.selectedTokenId)
+    ? tokenCollectionState.selectedTokenId
+    : (tokens[0]?.id || null);
+  setTokenCollectionState({ tokens, selectedTokenId });
+}
+
+async function discardRoomCacheAndReload() {
+  suppressBeforeUnloadPersist = true;
+  await localStore?.removeByPrefix(LOCAL_CACHE_PREFIX);
+  window.location.reload();
+}
+
 function attachFirebaseSync(sync) {
   firebaseSync = sync;
   // 本機沒有的圖片才向 Firebase 的 images/{雜湊} 下載。
   imageStore.setRemoteFetcher(sync.getImage);
+  flushOfflineChanges();
+  listenFogBatches();
 
   sync.onMapState?.((mapState) => {
+    // 暫存裡有地圖，Firebase 上卻沒有：GM 已清除這個房間，暫存也跟著清掉。
+    if (!mapState && hasMap) {
+      discardRoomCacheAndReload();
+      return;
+    }
     applyRemoteMapState(mapState, { restoreView: !hasMap }).catch((error) => console.error("[MapFog Firebase]", error));
   });
 
@@ -1424,7 +1466,8 @@ function attachFirebaseSync(sync) {
   sync.onTokenEvents({
     onAdd: (token, meta) => applyIncomingTokenEvent({ kind: "add", token, ...meta }),
     onPatch: (tokenId, changes, meta) => applyIncomingTokenEvent({ kind: "patch", tokenId, changes, ...meta }),
-    onRemove: (tokenId) => applyIncomingTokenEvent({ kind: "remove", tokenId })
+    onRemove: (tokenId) => applyIncomingTokenEvent({ kind: "remove", tokenId }),
+    onInitialSync: removeTokensMissingFromRoom
   });
 }
 
@@ -1553,31 +1596,74 @@ window.addEventListener("resize", () => {
   if (hasMap) fitToViewport();
 });
 
-window.addEventListener("beforeunload", () => {
-  // token 不在這裡保存：玩家關頁時的狀態可能比 GM 舊，寫回會蓋掉 GM 的 token 位置。
-  if (!hasMap || suppressBeforeUnloadPersist) return;
-  persistViewState();
+// iPad Safari 關閉分頁時常常不觸發 beforeunload，改用 pagehide 與切到背景時立刻寫入暫存。
+function persistBeforeLeaving() {
+  if (suppressBeforeUnloadPersist) return;
+  window.clearTimeout(sceneCacheTimer);
+  sceneCacheTimer = null;
+  writeSceneCache(true);
+  if (hasMap) persistViewState();
+}
+
+window.addEventListener("pagehide", persistBeforeLeaving);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") persistBeforeLeaving();
 });
 
 updateTokenControls();
 setTokenPanelOpen(false);
-whenFirebaseReady(attachFirebaseSync);
 
+async function readNewestScene() {
+  const own = await localStore.get(SCENE_CACHE_KEY);
+  const gm = await localStore.get(GM_SCENE_CACHE_KEY);
+  restoreOfflineChanges(own?.offlineChanges);
+  if (!gm?.map) return own;
+  if (!own?.map) return gm;
+  return Number(gm.savedAt) > Number(own.savedAt) ? gm : own;
+}
+
+// 開頁時先立刻顯示本機暫存畫面；完成後才連上 GM／Firebase，讓最新狀態蓋在暫存之上。
 async function restoreLocalState() {
-  const storedSnapshot = await readStoredSnapshot();
-  if (storedSnapshot) {
-    await applySnapshot(storedSnapshot, { restoreView: true });
+  if (!localStore) return;
+  const scene = await readNewestScene();
+  if (!scene) return;
+
+  const mapDataUrl = await imageStore.getLocal(scene.map?.hash);
+  if (!mapDataUrl) {
+    if (Array.isArray(scene.tokens)) setTokenCollectionState({ tokens: scene.tokens }, { sync: false });
     return;
   }
 
-  const storedTokenState = await readStoredTokenState();
-  if (storedTokenState) setTokenCollectionState(storedTokenState, { sync: false, persist: false });
+  const fogMatchesMap = scene.fog?.dataUrl
+    && Number(scene.fog.width) === Number(scene.map.width)
+    && Number(scene.fog.height) === Number(scene.map.height);
+  await applySnapshot({
+    type: "snapshot",
+    width: scene.map.width,
+    height: scene.map.height,
+    mapHash: scene.map.hash,
+    mapDataUrl,
+    fogDataUrl: fogMatchesMap ? scene.fog.dataUrl : "",
+    gridSettings: scene.grid,
+    tokenState: { tokens: Array.isArray(scene.tokens) ? scene.tokens : [] }
+  }, { restoreView: true });
+  if (fogMatchesMap && scene.fog.epoch) {
+    const { epoch, seq, base, checkpointHash, mapHash } = scene.fog;
+    fogSync = { epoch, seq: Number(seq) || 0, base, checkpointHash: checkpointHash || "", mapHash: mapHash || scene.map.hash };
+    fogCacheDataUrl = scene.fog.dataUrl;
+    fogCacheDirty = false;
+  }
+  window.dispatchEvent(new CustomEvent("mapfog:cache-shown"));
 }
+
+if (IS_FIREBASE_ROOM) window.MapFogImageStore.cleanIdleRoomCaches(LOCAL_CACHE_PREFIX).catch((error) => console.error("[MapFog 暫存]", error));
 
 // 先顯示本機暫存，再向 GM 要最新狀態，讓 GM 的回覆一定蓋在暫存之上。
 restoreLocalState()
   .catch((error) => console.error("[MapFog restore]", error))
   .finally(() => {
     flushQueuedTokenUpdates();
+    scheduleLocalImagePrune();
+    whenFirebaseReady(attachFirebaseSync);
     syncChannel?.postMessage({ type: "requestSnapshot", source: "player" });
   });
