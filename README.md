@@ -13,7 +13,7 @@ python -m http.server 8765
 開啟 `http://127.0.0.1:8765/`，再選擇 GM 或玩家入口。在 Windows 上也可執行 `start-server.bat`（會開在同一個網址）。
 
 - `gm.html`：GM 控制台
-- `player.html`：玩家畫面
+- `pl.html`：玩家畫面
 - `?room=房間名`：支援同步服務時，共用的遠端房間代號（見首頁說明）
 - `?olroom=房間名`：本機分房暫存；並非不同裝置間的連線方式
 
@@ -185,7 +185,7 @@ GM 與玩家、olroom 與 room 都使用同一套本機暫存（瀏覽器的 Ind
 準備：執行 `start-server.bat`。用**同一個瀏覽器**開兩個視窗：
 
 - 視窗 1：`http://127.0.0.1:8765/gm.html?olroom=testroom1`
-- 視窗 2：`http://127.0.0.1:8765/player.html?olroom=testroom1`
+- 視窗 2：`http://127.0.0.1:8765/pl.html?olroom=testroom1`
 
 步驟：
 
@@ -214,7 +214,7 @@ GM 與玩家、olroom 與 room 都使用同一套本機暫存（瀏覽器的 Ind
 用你平常讓玩家連線的網址開啟：
 
 - 裝置 1（GM）：`…/gm.html?room=testroom1`
-- 裝置 2（玩家，例如平板或手機）：`…/player.html?room=testroom1`
+- 裝置 2（玩家，例如平板或手機）：`…/pl.html?room=testroom1`
 
 步驟：
 
@@ -229,7 +229,7 @@ GM 與玩家、olroom 與 room 都使用同一套本機暫存（瀏覽器的 Ind
    - 打開 Wi-Fi，玩家畫面恢復「已連線」，GM 的人數也加回來。
 7. **兩個 GM 警告**：在另一個分頁也開 `gm.html?room=testroom1`，兩個 GM 畫面右下角都出現黃色警告。關掉其中一個後，警告消失。
 8. **清除 room**：GM 在地圖設定按「清除目前 room 暫存」。鎖定的 token 不會被補回來，玩家畫面的 token 也清空。
-9. **房間名稱不符合規則**：開 `…/player.html?room=test1`（只有 5 個字元）。幾秒內右下角出現紅點「無法使用房間「test1」：Firebase 拒絕存取……請換一個名稱。」GM 畫面開 `…/gm.html?room=test1` 也一樣。改回 `testroom1` 後恢復「已連線」。
+9. **房間名稱不符合規則**：開 `…/pl.html?room=test1`（只有 5 個字元）。幾秒內右下角出現紅點「無法使用房間「test1」：Firebase 拒絕存取……請換一個名稱。」GM 畫面開 `…/gm.html?room=test1` 也一樣。改回 `testroom1` 後恢復「已連線」。
 
 ### C. 圖片壓縮：同一台電腦、兩個視窗（olroom）
 
@@ -238,7 +238,7 @@ GM 與玩家、olroom 與 room 都使用同一套本機暫存（瀏覽器的 Ind
 用同一個瀏覽器、同一個網址開頭開啟：
 
 - GM：`http://127.0.0.1:8765/gm.html?olroom=image-test`
-- 玩家：`http://127.0.0.1:8765/player.html?olroom=image-test`
+- 玩家：`http://127.0.0.1:8765/pl.html?olroom=image-test`
 
 1. **大 PNG 地圖**：GM 開啟地圖設定，上傳 8000×6000 PNG。應先出現「正在處理地圖…」，完成後顯示 4096×3072、縮放 51.2%，以及實際輸出格式與容量。玩家也應看到同一張地圖；先按「全開迷霧」方便比對。
 2. **保留 JPG／WebP**：換成 3000px、小於 5MB 的 JPG。應顯示「已保留原檔」，尺寸不變、縮放 100%、仍為 JPG。符合條件的 WebP 也應保留原檔。PNG 即使很小仍會走轉檔流程。
@@ -253,7 +253,7 @@ GM 與玩家、olroom 與 room 都使用同一套本機暫存（瀏覽器的 Ind
 
 準備：使用可從兩台裝置開啟的網站網址，以及 Firebase 規則允許的測試房間。`127.0.0.1` 在每台裝置都指向自己，不能讓平板連到筆電；請用平常的網站網址，或同網路下筆電的區域網路位址。若出現 `permission_denied`，先確認房間名稱是 8–10 個字元，再確認該測試房間的規則。
 
-1. 裝置 1 開 `…/gm.html?room=image-test`，裝置 2 開 `…/player.html?room=image-test`。重做 C 的第 1～6 步；兩台裝置應收到同樣的處理後圖片。
+1. 裝置 1 開 `…/gm.html?room=image-test`，裝置 2 開 `…/pl.html?room=image-test`。重做 C 的第 1～6 步；兩台裝置應收到同樣的處理後圖片。
 2. **確認 token 流量**：兩邊各上傳一張 1–2MB 照片。在 Firebase Console 的 Realtime Database 資料頁，`rooms/image-test/token/tokensById` 裡的 token 只有 `imageHash`；到 `rooms/image-test/images/{那個雜湊}` 查看 `dataUrl`，應以 `data:image/webp;base64,` 開頭。將**單張圖片節點**匯出 JSON，下載檔案通常只有幾十 KB，而不是原本的 1–2MB。圖片細節會影響容量，PNG 備用輸出可能更大。
 3. **確認地圖資料**：在 `rooms/image-test/map` 檢查 `width`、`height`，大地圖應為 4096、3072（若因 9MB 限制繼續縮小，則會更小）。`map.hash` 指向的 `images/{雜湊}/dataUrl` 格式須與 GM 提示一致。完整字串應小於 9,000,000 bytes，可用下方檢查讀取目前地圖的長度。
 4. **容量重試**：用細節很多的大 PNG 測試，尤其在不能輸出 WebP 的 Safari。若初次結果太大，應繼續縮小，完成提示會反映最終尺寸；「room 傳送資料」必須小於 9MB。若 6 次後仍不合格，應顯示尚未套用的錯誤，兩邊保留舊地圖。一般圖片可能第一次就合格，不一定能自然觸發失敗分支。
@@ -297,7 +297,7 @@ Token 寬、高應都是 256；有透明左上角的地圖，其左上角透明�
 
 ### F. 本機暫存與離線：同一台電腦、兩個瀏覽器視窗（olroom）
 
-準備：同 A，用同一個瀏覽器開 `gm.html?olroom=cachetest1` 與 `player.html?olroom=cachetest1`。
+準備：同 A，用同一個瀏覽器開 `gm.html?olroom=cachetest1` 與 `pl.html?olroom=cachetest1`。
 
 1. GM 上傳地圖與 2 個 token，擦掉幾塊迷霧、移動一個 token。玩家畫面一致。
 2. **重新整理玩家**：按 F5。地圖、迷霧形狀、token 位置立刻出現，和 GM 一致。
@@ -312,7 +312,7 @@ Token 寬、高應都是 256；有透明左上角的地圖，其左上角透明�
 
 1. **重新整理不再下載圖片**：
    - GM 上傳一張大地圖（例如 3MB 以上）與 2 個 token，擦幾塊迷霧。
-   - 玩家第一次開 `…/player.html?room=cachetest1`，等地圖出現。Console 會看到「從 Firebase 下載（x MB）」。
+   - 玩家第一次開 `…/pl.html?room=cachetest1`，等地圖出現。Console 會看到「從 Firebase 下載（x MB）」。
    - 玩家按重新整理：地圖、迷霧、token 幾乎立刻出現。Console 只看到「從本機暫存載入…不需下載」，沒有「從 Firebase 下載」。
    - 也可以到 Firebase Console 的「用量」頁比較：多次重新整理，下載量幾乎不增加（用量頁約有 1 小時延遲）。
    - Firebase 走 WebSocket 連線，開發者工具「網路」頁籤不會一筆一筆列出下載；要看的話點選 `.firebasedatabase.app` 那一列，切到「訊息」查看。

@@ -11,7 +11,7 @@ echo.
 echo Open:
 echo   http://%HOST%:%PORT%/index.html
 echo   http://%HOST%:%PORT%/gm.html
-echo   http://%HOST%:%PORT%/player.html
+echo   http://%HOST%:%PORT%/pl.html
 echo.
 echo Press Ctrl+C to stop the server, then close this window.
 echo.
