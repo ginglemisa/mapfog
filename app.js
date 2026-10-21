@@ -2299,18 +2299,20 @@ function collectUnusedImages() {
 
   const inUse = getImageHashesInUse();
   const now = firebaseSync.serverNow();
-  let waitingForGrace = false;
+  // 還在保留期內的圖片，等最早到期的那張過期後再檢查一次。
+  let nextCheckIn = Infinity;
   const unused = [];
   for (const [hash, info] of Object.entries(remoteImageIndex)) {
     if (inUse.has(hash)) continue;
-    if (now - Number(info?.addedAt || 0) < IMAGE_GC_GRACE_MS) waitingForGrace = true;
+    const remaining = Number(info?.addedAt || 0) + IMAGE_GC_GRACE_MS - now;
+    if (remaining > 0) nextCheckIn = Math.min(nextCheckIn, remaining);
     else unused.push(hash);
   }
   if (unused.length) {
     console.info(`[MapFog 圖片] 從 Firebase 刪除 ${unused.length} 張沒人用的圖片`, unused);
     firebaseSync.deleteImages(unused).catch(logFirebaseError);
   }
-  if (waitingForGrace) scheduleImageGc(IMAGE_GC_GRACE_MS);
+  if (nextCheckIn !== Infinity) scheduleImageGc(nextCheckIn + 1000);
 }
 
 // 本機圖片暫存也只留還在用的；GM 與玩家視窗共用同一份暫存時，雙方暫存畫面用到的都會保留。
