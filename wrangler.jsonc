@@ -8,5 +8,7 @@
   },
   "assets": {
     "directory": "."
-  }
+  },
+  // 非正式分支的建置會執行 wrangler preview，這個區塊必須存在，內容可留空。
+  "previews": {}
 }

@@ -1,6 +1,6 @@
 // 測量工具（GM 與玩家頁共用）：只有 GM 開啟格線、而且有地圖時才顯示。
 // - 直線、曲線：所有人都看得到，每個畫面同時只留一條，量完留著，下一次量或關掉工具時清除。
-// - 錐形、圓形、方形：地圖上的範圍，所有人都看得到，都能拖曳、旋轉與刪除。
+// - 錐形、圓形、方形：地圖上的範圍，所有人都看得到；移動、旋轉與刪除限放置的人與 GM。
 // 線條、文字與把手畫在跟螢幕同尺寸的覆蓋層上，粗細與字級不受地圖縮放影響。
 (() => {
   "use strict";
@@ -12,6 +12,14 @@
 
   const LOCAL_STORAGE_KEY = `${host.storagePrefix}measure.v1`;
   const PANEL_STORAGE_KEY = "mapfog.measurePanel.v1";
+  // 沒有帳號，「自己放的範圍」以這個瀏覽器記下的清單為準；LAN 伺服器另外用這把鑰匙驗證刪除權限。
+  // 同一台電腦的 GM 與玩家視窗共用 localStorage，所以依身分分開存放。
+  const isGm = document.body.classList.contains("gm-page");
+  const ROLE_SUFFIX = isGm ? "gm" : "player";
+  const OWNED_STORAGE_KEY = `${host.storagePrefix}measure.owned.${ROLE_SUFFIX}.v1`;
+  const OWNER_TOKEN_STORAGE_KEY = `${host.storagePrefix}measure.ownerToken.${ROLE_SUFFIX}.v1`;
+  const MAX_OWNED_IDS = 300;
+  const NOTICE_MS = 3000;
   const PUBLISH_INTERVAL_MS = 100;
   const RENDER_FALLBACK_MS = 120;
   const MAX_TEMPLATES = 100;
@@ -28,12 +36,16 @@
   };
   const TOOL_COLORS = { line: "56, 189, 248", path: "250, 204, 21" };
   const HINTS = {
-    idle: "拖曳範圍可以移動，拖曳 ↻ 可以旋轉。",
+    idle: "拖曳範圍可以移動，拖曳 ↻ 可以旋轉，選取後按 Delete 刪除。",
     line: "在地圖上按住，從一格拖到另一格，顯示相距幾格。",
     path: "按住沿路線拖曳，計算走過幾格；往回拖可以退一格。"
   };
 
   const templates = new Map();
+  const ownedIds = new Set(readOwnedIds());
+  const ownerToken = readOwnerToken();
+  let selectedTemplateId = null;
+  let noticeTimer = 0;
   const lastSizes = { cone: "3", circle: "3", square: "3" };
   let sync = null;
   let tool = null;
@@ -185,17 +197,52 @@
       if (templates.has(held.id)) templates.set(held.id, held);
       else endSession();
     }
+    if (selectedTemplateId && !templates.has(selectedTemplateId)) selectedTemplateId = null;
     renderList();
     scheduleRender();
   }
 
+  function readOwnedIds() {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(OWNED_STORAGE_KEY) || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function readOwnerToken() {
+    try {
+      const saved = window.localStorage.getItem(OWNER_TOKEN_STORAGE_KEY);
+      if (saved) return saved;
+      const created = `${createTemplateId()}${createTemplateId()}`;
+      window.localStorage.setItem(OWNER_TOKEN_STORAGE_KEY, created);
+      return created;
+    } catch {
+      return `${createTemplateId()}${createTemplateId()}`;
+    }
+  }
+
+  function rememberOwned(templateId) {
+    ownedIds.add(templateId);
+    try {
+      window.localStorage.setItem(OWNED_STORAGE_KEY, JSON.stringify([...ownedIds].slice(-MAX_OWNED_IDS)));
+    } catch {
+      // 記不住只是重新整理後這個範圍要請 GM 刪除。
+    }
+  }
+
+  function canModify(template) {
+    return isGm || ownedIds.has(template.id);
+  }
+
   function publishAdd(template) {
-    if (sync) sync.addMeasureTemplate(template).catch(logError);
+    if (sync) sync.addMeasureTemplate(template, ownerToken).catch(logError);
     else if (!host.isRemoteRoom) writeLocal();
   }
 
   function publishRemove(templateId) {
-    if (sync) sync.removeMeasureTemplate(templateId).catch(logError);
+    if (sync) sync.removeMeasureTemplate(templateId, ownerToken).catch(logError);
     else if (!host.isRemoteRoom) writeLocal();
   }
 
@@ -205,7 +252,7 @@
     const template = dirtyTemplateId ? templates.get(dirtyTemplateId) : null;
     dirtyTemplateId = null;
     if (!template) return;
-    if (sync) sync.updateMeasureTemplate(template.id, { x: template.x, y: template.y, angle: template.angle }).catch(logError);
+    if (sync) sync.updateMeasureTemplate(template.id, { x: template.x, y: template.y, angle: template.angle }, ownerToken).catch(logError);
     else if (!host.isRemoteRoom) writeLocal();
   }
 
@@ -282,13 +329,25 @@
     // 預設朝螢幕右方：畫面旋轉時，地圖上的角度要反過來補償。
     const template = { id: createTemplateId(), shape, size, x: origin.x, y: origin.y, angle: (360 - host.getView().rotation) % 360, order: Date.now() };
     templates.set(template.id, template);
+    rememberOwned(template.id);
+    selectedTemplateId = template.id;
     publishAdd(template);
     renderList();
     scheduleRender();
   }
 
+  function selectTemplate(templateId) {
+    if (selectedTemplateId === templateId) return;
+    selectedTemplateId = templateId;
+    renderList();
+    scheduleRender();
+  }
+
   function removeTemplate(templateId) {
-    if (!templates.delete(templateId)) return;
+    const template = templates.get(templateId);
+    if (!template || !canModify(template)) return;
+    templates.delete(templateId);
+    if (selectedTemplateId === templateId) selectedTemplateId = null;
     if (session?.templateId === templateId) endSession();
     publishRemove(templateId);
     renderList();
@@ -386,7 +445,8 @@
     } else {
       traceScreenPolygon(shape.polygon);
     }
-    strokeWithHalo(`rgb(${color})`, 2);
+    const selected = template.id === selectedTemplateId;
+    strokeWithHalo(selected ? "#f8fafc" : `rgb(${color})`, selected ? 3 : 2);
   }
 
   function drawGrip(point, color, glyph) {
@@ -491,6 +551,7 @@
       // 圓形與發散的中心就是原點把手，標籤往下移開才看得到數字。
       if (!shape.rotateHandle) labelPoint.y += CIRCLE_LABEL_OFFSET;
       drawLabel(`${template.size} 格`, labelPoint);
+      if (!canModify(template)) continue;
       drawGrip(shape.origin, color, "");
       if (shape.rotateHandle) drawGrip(shape.rotateHandle, color, "↻");
     }
@@ -510,7 +571,7 @@
     const model = templateModel();
     let best = null;
     let bestDistance = event.pointerType === "mouse" ? MOUSE_GRIP_REACH : TOUCH_GRIP_REACH;
-    for (const template of orderedTemplates()) {
+    for (const template of orderedTemplates().filter(canModify)) {
       const shape = core.templateShape(template, model);
       const grips = [{ kind: "move", point: shape.origin }];
       if (shape.rotateHandle) grips.push({ kind: "rotate", point: shape.rotateHandle });
@@ -529,7 +590,7 @@
 
   function findTemplateBody(point) {
     const model = templateModel();
-    return orderedTemplates().reverse().find((template) => core.pointInShape(core.templateShape(template, model), point)) || null;
+    return orderedTemplates().filter(canModify).reverse().find((template) => core.pointInShape(core.templateShape(template, model), point)) || null;
   }
 
   function isOverToken(event) {
@@ -632,14 +693,17 @@
     const grip = findGrip(event);
     if (grip) {
       claimPointer(event);
+      selectTemplate(grip.template.id);
       beginTemplateSession(grip.kind, grip.template, event);
-    } else if (!panel.hidden && !isOverToken(event)) {
-      const template = findTemplateBody(host.toMapPoint(event));
-      if (!template) return;
-      claimPointer(event);
-      beginTemplateSession("move", template, event);
     } else {
-      return;
+      const template = !panel.hidden && !isOverToken(event) ? findTemplateBody(host.toMapPoint(event)) : null;
+      if (!template) {
+        selectTemplate(null);
+        return;
+      }
+      claimPointer(event);
+      selectTemplate(template.id);
+      beginTemplateSession("move", template, event);
     }
     viewport.classList.add("measure-dragging");
   }
@@ -759,11 +823,36 @@
       remove.setAttribute("aria-label", `移除 ${name.textContent}`);
       remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
       remove.addEventListener("click", () => removeTemplate(template.id));
-      item.append(swatch, name, remove);
+      item.append(swatch, name);
+      if (canModify(template)) item.append(remove);
+      item.classList.toggle("selected", template.id === selectedTemplateId);
+      item.addEventListener("click", () => selectTemplate(template.id));
       return item;
     }));
     emptyNote.hidden = templates.size > 0;
-    clearButton.hidden = templates.size === 0;
+    clearButton.hidden = !orderedTemplates().some(canModify);
+    clearButton.textContent = isGm ? "全部清除" : "清除我的";
+  }
+
+  function showNotice(text) {
+    hint.textContent = text;
+    window.clearTimeout(noticeTimer);
+    noticeTimer = window.setTimeout(updateToolUi, NOTICE_MS);
+  }
+
+  function isTypingTarget(target) {
+    return target instanceof Element
+      && Boolean(target.closest('input:not([type="checkbox"]):not([type="range"]), textarea, select, [contenteditable]'));
+  }
+
+  // Mac 鍵盤的 delete 鍵送出的是 Backspace，兩個都接受。
+  function handleDeleteKey(event) {
+    if (!modal.hidden || !available() || isTypingTarget(event.target)) return;
+    const template = templates.get(selectedTemplateId);
+    if (!template) return;
+    event.preventDefault();
+    if (canModify(template)) removeTemplate(template.id);
+    else showNotice("這個範圍是別人放的，只有放的人或 GM 能刪除。");
   }
 
   function updateToolUi() {
@@ -958,6 +1047,10 @@
     element.addEventListener("click", () => stepModalValue(Number(element.dataset.step)));
   }
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Delete" || event.key === "Backspace") {
+      handleDeleteKey(event);
+      return;
+    }
     if (event.key !== "Escape") return;
     if (!modal.hidden) closeModal();
     else if (tool) setTool(null);

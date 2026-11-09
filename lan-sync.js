@@ -957,21 +957,21 @@
         listeners.tokens.delete(entry);
       };
     },
-    addMeasureTemplate(template) {
+    addMeasureTemplate(template, ownerToken) {
       if (!template?.id) return Promise.resolve();
       mirror.measureTemplates.set(template.id, clone(template));
-      return enqueue("addMeasureTemplate", { template: clone(template) }, { keys: [`measure:${template.id}`], softFail: true });
+      return enqueue("addMeasureTemplate", { template: clone(template), ownerToken }, { keys: [`measure:${template.id}`], softFail: true });
     },
-    updateMeasureTemplate(templateId, changes) {
+    updateMeasureTemplate(templateId, changes, ownerToken) {
       const previous = mirror.measureTemplates.get(templateId);
       if (!previous || !Object.keys(changes || {}).length) return Promise.resolve();
       mirror.measureTemplates.set(templateId, { ...previous, ...changes });
-      return enqueue("updateMeasureTemplate", { templateId, changes: clone(changes) }, { keys: [`measure:${templateId}`], softFail: true });
+      return enqueue("updateMeasureTemplate", { templateId, changes: clone(changes), ownerToken }, { keys: [`measure:${templateId}`], softFail: true });
     },
-    removeMeasureTemplate(templateId) {
+    removeMeasureTemplate(templateId, ownerToken) {
       if (!templateId) return Promise.resolve();
       mirror.measureTemplates.delete(templateId);
-      return enqueue("removeMeasureTemplate", { templateId }, { keys: [`measure:${templateId}`], softFail: true });
+      return enqueue("removeMeasureTemplate", { templateId, ownerToken }, { keys: [`measure:${templateId}`], softFail: true });
     },
     sendMeasureLine(line) {
       ownMeasureLine = clone(line);

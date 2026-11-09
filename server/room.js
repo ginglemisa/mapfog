@@ -41,8 +41,15 @@ function createEmptyState(roomId) {
     tokenMetas: {},
     tombstones: {},
     imageIndex: {},
-    measureTemplates: {}
+    measureTemplates: {},
+    // 範圍 id 對應放置者鑰匙的雜湊，只用來驗證刪除權限，不會送給任何人。
+    measureOwners: {}
   };
+}
+
+function digestOwnerToken(token) {
+  if (typeof token !== "string" || token.length < 16 || token.length > 200) return "";
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 function writeFileAtomic(filePath, content) {
@@ -290,6 +297,11 @@ class Room {
     if (line) this.measureLines.set(client.clientId, line);
     else if (!this.measureLines.delete(client.clientId)) return null;
     return { t: "measureLine", owner: client.clientId, line };
+  }
+
+  ownsMeasureTemplate(templateId, ownerToken) {
+    const digest = digestOwnerToken(ownerToken);
+    return Boolean(digest) && this.state.measureOwners[templateId] === digest;
   }
 
   measureCorrection(templateId) {
@@ -565,14 +577,20 @@ const OP_HANDLERS = {
     return result(true, { rev, toOthers: [{ t: "tokenRemove", tokenId, rev, by: client.clientId, sourceRole: client.role }] });
   },
 
-  // 地圖上的範圍沒有鎖定也沒有私有資料：所有人都能操作，以最後送達的為準。
+  // 地圖上的範圍：所有人都能新增；移動、旋轉與刪除只限放置的人與 GM。
   addMeasureTemplate(client, op) {
     const template = v.sanitizeMeasureTemplate(op.template);
     if (!template) return reject("bad-request", "範圍資料格式錯誤");
     const templates = this.state.measureTemplates;
-    if (!templates[template.id] && Object.keys(templates).length >= MAX_MEASURE_TEMPLATES) {
+    const exists = Boolean(templates[template.id]);
+    if (exists && client.role !== "gm" && !this.ownsMeasureTemplate(template.id, op.ownerToken)) {
+      return reject("forbidden", "玩家不能覆蓋別人放的範圍", { toSender: [this.measureCorrection(template.id)] });
+    }
+    if (!exists && Object.keys(templates).length >= MAX_MEASURE_TEMPLATES) {
       return reject("too-large", `每個房間最多 ${MAX_MEASURE_TEMPLATES} 個範圍`, { toSender: [this.measureCorrection(template.id)] });
     }
+    const ownerDigest = digestOwnerToken(op.ownerToken);
+    if (!exists && ownerDigest) this.state.measureOwners[template.id] = ownerDigest;
     templates[template.id] = template;
     this.scheduleSave();
     return result(true, { toOthers: [{ t: "measureAdd", template }] });
@@ -583,6 +601,9 @@ const OP_HANDLERS = {
     const templateId = op.templateId;
     if (!v.isValidId(templateId)) return reject("bad-request", "範圍 id 格式錯誤");
     if (!templates[templateId]) return reject("gone", "這個範圍已不存在", { toSender: [this.measureCorrection(templateId)] });
+    if (client.role !== "gm" && !this.ownsMeasureTemplate(templateId, op.ownerToken)) {
+      return reject("forbidden", "只有放置的人或 GM 能移動這個範圍", { toSender: [this.measureCorrection(templateId)] });
+    }
     const changes = v.sanitizeMeasureChanges(op.changes);
     if (!Object.keys(changes).length) return result(true);
     templates[templateId] = { ...templates[templateId], ...changes };
@@ -594,7 +615,11 @@ const OP_HANDLERS = {
     const templateId = op.templateId;
     if (!v.isValidId(templateId)) return reject("bad-request", "範圍 id 格式錯誤");
     if (!this.state.measureTemplates[templateId]) return result(true);
+    if (client.role !== "gm" && !this.ownsMeasureTemplate(templateId, op.ownerToken)) {
+      return reject("forbidden", "只有放置的人或 GM 能刪除這個範圍", { toSender: [this.measureCorrection(templateId)] });
+    }
     delete this.state.measureTemplates[templateId];
+    delete this.state.measureOwners[templateId];
     this.scheduleSave();
     return result(true, { toOthers: [{ t: "measureRemove", templateId }] });
   },
