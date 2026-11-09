@@ -18,7 +18,7 @@ const MAX_MEASURE_LINE_CELLS = 2000;
 const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order", "locked"];
 // 玩家只能改未鎖定 token 的位置、大小與形狀。
 const PLAYER_EDITABLE_TOKEN_KEYS = ["x", "y", "size", "shape"];
-// 地圖上的範圍（錐形、球形、發散、方形）：GM 與玩家都能新增、移動、旋轉與刪除。
+// 地圖上的範圍（錐形、球形、發散、方形）。
 const MEASURE_SHAPES = new Set(["cone", "circle", "emanation", "square"]);
 const MEASURE_TEMPLATE_KEYS = ["x", "y", "size", "angle", "order"];
 

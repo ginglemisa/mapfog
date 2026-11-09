@@ -418,7 +418,7 @@ test("地圖範圍：GM 與玩家都能新增、移動、旋轉與刪除，中�
   const player = await env.connect({ role: "player" });
   const template = { id: "tpl-1", shape: "cone", x: 200, y: 300, size: 3, angle: 0, order: 1 };
 
-  assert.equal((await player.op("addMeasureTemplate", { template })).ok, true);
+  assert.equal((await player.op("addMeasureTemplate", { template, ownerToken: "player-owner-token-1" })).ok, true);
   const added = await env.gm.waitFor((message) => message.t === "measureAdd");
   assert.deepEqual(added.template, template);
 
@@ -429,7 +429,7 @@ test("地圖範圍：GM 與玩家都能新增、移動、旋轉與刪除，中�
   const late = await env.connect({ role: "player" });
   assert.deepEqual(late.welcome.state.measureTemplates, [{ ...template, x: 280, angle: 45 }]);
 
-  assert.equal((await player.op("removeMeasureTemplate", { templateId: "tpl-1" })).ok, true);
+  assert.equal((await player.op("removeMeasureTemplate", { templateId: "tpl-1", ownerToken: "player-owner-token-1" })).ok, true);
   await env.gm.waitFor((message) => message.t === "measureRemove" && message.templateId === "tpl-1");
 });
 
@@ -538,4 +538,41 @@ test("斜走房規會同步給玩家，只有 GM 能改，舊資料預設關閉"
   await env.gm.op("sendGridSettings", { grid: { enabled: true, type: "square", size: 80 } });
   const late = await env.connect({ role: "player" });
   assert.equal(late.welcome.state.grid.diagonalHouseRule, false);
+});
+
+test("地圖範圍修改權限：玩家只能移動與刪除自己放的，GM 可以操作全部，鑰匙不會外流", async (t) => {
+  const env = await setupRoom(t);
+  const alice = await env.connect({ role: "player" });
+  const bob = await env.connect({ role: "player" });
+  const aliceKey = "alice-owner-token-0001";
+  const template = (id) => ({ id, shape: "circle", x: 40, y: 40, size: 2, angle: 0 });
+  await alice.op("addMeasureTemplate", { template: template("a-1"), ownerToken: aliceKey });
+  await alice.op("addMeasureTemplate", { template: template("a-2"), ownerToken: aliceKey });
+  await env.gm.op("addMeasureTemplate", { template: template("g-1"), ownerToken: "gm-owner-token-000001" });
+
+  for (const attempt of [{ templateId: "a-1", ownerToken: "bob-owner-token-00001" }, { templateId: "a-1" }, { templateId: "g-1", ownerToken: aliceKey }]) {
+    const denied = await (attempt.templateId === "g-1" ? alice : bob).op("removeMeasureTemplate", attempt);
+    assert.equal(denied.ok, false);
+    assert.equal(denied.code, "forbidden");
+  }
+  const correction = await bob.waitFor((message) => message.t === "measure" && message.templateId === "a-1");
+  assert.equal(correction.template.id, "a-1");
+
+  const stolen = await bob.op("addMeasureTemplate", { template: { ...template("a-1"), x: 999 }, ownerToken: "bob-owner-token-00001" });
+  assert.equal(stolen.ok, false);
+
+  // 移動與旋轉也只限放置的人與 GM。
+  const moveDenied = await bob.op("updateMeasureTemplate", { templateId: "a-1", changes: { x: 120 } }, { ownerToken: "bob-owner-token-00001" });
+  assert.equal(moveDenied.ok, false);
+  assert.equal(moveDenied.code, "forbidden");
+  assert.equal((await alice.op("updateMeasureTemplate", { templateId: "a-1", changes: { x: 130 }, ownerToken: aliceKey })).ok, true);
+  assert.equal((await env.gm.op("updateMeasureTemplate", { templateId: "a-1", changes: { angle: 45 } })).ok, true);
+
+  assert.equal((await alice.op("removeMeasureTemplate", { templateId: "a-1", ownerToken: aliceKey })).ok, true);
+  assert.equal((await env.gm.op("removeMeasureTemplate", { templateId: "a-2" })).ok, true);
+
+  const late = await env.connect({ role: "player" });
+  assert.deepEqual(late.welcome.state.measureTemplates.map((item) => item.id), ["g-1"]);
+  assert.equal(JSON.stringify(late.welcome).includes("measureOwners"), false);
+  assert.equal(JSON.stringify(late.welcome).includes(aliceKey), false);
 });
