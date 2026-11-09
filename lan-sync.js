@@ -46,6 +46,8 @@
   let resumeFrom = null;
   let pendingSaveTimer = null;
   let pendingStored = false;
+  // 自己畫面上的直線或曲線；伺服器在斷線時會移除，重新連線後要再送一次。
+  let ownMeasureLine = null;
 
   const mirror = {
     map: null,
@@ -56,6 +58,8 @@
     fogEpoch: "",
     fogItems: new Map(),
     tokens: new Map(),
+    measureTemplates: new Map(),
+    measureLines: new Map(),
     imageIndex: {},
     presence: { players: 0, gms: 0 }
   };
@@ -68,6 +72,8 @@
     dice: new Set(),
     imageIndex: new Set(),
     tokens: new Set(),
+    measureTemplates: new Set(),
+    measureLines: new Set(),
     fogBatches: new Set()
   };
 
@@ -335,6 +341,7 @@
     resumeFrom = null;
     // 等待完整狀態期間又做的修改，現在送出。
     for (const entry of outbox.splice(0)) transmit(entry, entry.offline);
+    if (ownMeasureLine) sendOwnMeasureLine();
     schedulePendingSave();
     emitConnectionState();
   }
@@ -551,12 +558,44 @@
       }
     }
 
+    const nextTemplates = new Map();
+    for (const template of state.measureTemplates || []) {
+      if (template?.id && !pendingKeys.has(`measure:${template.id}`)) nextTemplates.set(template.id, template);
+    }
+    for (const [templateId, template] of mirror.measureTemplates) {
+      if (pendingKeys.has(`measure:${templateId}`)) nextTemplates.set(templateId, template);
+    }
+    mirror.measureTemplates = nextTemplates;
+    emitMeasureTemplates();
+
+    mirror.measureLines = new Map();
+    for (const { owner, ...line } of state.measureLines || []) {
+      if (owner && owner !== clientId) mirror.measureLines.set(owner, line);
+    }
+    emitMeasureLines();
+
     if (ROLE === "gm") {
       mirror.imageIndex = state.imageIndex || {};
       emitValue("imageIndex", mirror.imageIndex);
     }
     mirror.presence = { players: Number(state.presence?.players) || 0, gms: Number(state.presence?.gms) || 0 };
     deliverFogBatches();
+  }
+
+  function emitMeasureLines() {
+    const lines = [...mirror.measureLines].map(([owner, line]) => ({ owner, ...line }));
+    for (const callback of listeners.measureLines) safeCall(callback, clone(lines));
+  }
+
+  // 線只是暫時的顯示，斷線時不排隊補送，避免重新連線時才冒出過時的線。
+  function sendOwnMeasureLine() {
+    if (phase !== "live" || socket?.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ t: "measureLine", line: ownMeasureLine }));
+  }
+
+  function emitMeasureTemplates() {
+    const templates = [...mirror.measureTemplates.values()];
+    for (const callback of listeners.measureTemplates) safeCall(callback, clone(templates));
   }
 
   function announceTokens(handlers) {
@@ -636,6 +675,32 @@
         // 伺服器的權威版本：自己的修改被拒絕（鎖定、已刪除或衝突）時，改回伺服器上的樣子。
         diffToken(message.tokenId, message.token ? { token: message.token, rev: message.rev || 0, by: message.by || "", sourceRole: message.sourceRole } : null, "server");
         break;
+      case "measureAdd":
+        mirror.measureTemplates.set(message.template.id, message.template);
+        emitMeasureTemplates();
+        break;
+      case "measurePatch": {
+        const previous = mirror.measureTemplates.get(message.templateId);
+        if (!previous) break;
+        mirror.measureTemplates.set(message.templateId, { ...previous, ...message.changes });
+        emitMeasureTemplates();
+        break;
+      }
+      case "measureRemove":
+        mirror.measureTemplates.delete(message.templateId);
+        emitMeasureTemplates();
+        break;
+      case "measureLine":
+        if (message.line) mirror.measureLines.set(message.owner, message.line);
+        else mirror.measureLines.delete(message.owner);
+        emitMeasureLines();
+        break;
+      case "measure":
+        // 伺服器的權威版本：自己的修改被拒絕（範圍已被別人刪除或達到上限）時改回來。
+        if (message.template) mirror.measureTemplates.set(message.templateId, message.template);
+        else mirror.measureTemplates.delete(message.templateId);
+        emitMeasureTemplates();
+        break;
       case "imageIndex":
         mirror.imageIndex = message.index || {};
         emitValue("imageIndex", mirror.imageIndex);
@@ -647,6 +712,8 @@
         const tokenIds = [...mirror.tokens.keys()];
         resetMirror();
         mirror.tokens.clear();
+        mirror.measureTemplates.clear();
+        emitMeasureTemplates();
         // 先通知地圖被清空（畫面會清掉暫存並重新整理），再移除 token。
         emitValue("map", null);
         emitValue("fog", null);
@@ -778,6 +845,8 @@
         if (!ok) throw new Error("LAN 伺服器拒絕清除房間");
         resetMirror();
         mirror.tokens.clear();
+        mirror.measureTemplates.clear();
+        emitMeasureTemplates();
       });
     },
     saveFogState(fogState) {
@@ -886,6 +955,45 @@
       });
       return function unsubscribe() {
         listeners.tokens.delete(entry);
+      };
+    },
+    addMeasureTemplate(template) {
+      if (!template?.id) return Promise.resolve();
+      mirror.measureTemplates.set(template.id, clone(template));
+      return enqueue("addMeasureTemplate", { template: clone(template) }, { keys: [`measure:${template.id}`], softFail: true });
+    },
+    updateMeasureTemplate(templateId, changes) {
+      const previous = mirror.measureTemplates.get(templateId);
+      if (!previous || !Object.keys(changes || {}).length) return Promise.resolve();
+      mirror.measureTemplates.set(templateId, { ...previous, ...changes });
+      return enqueue("updateMeasureTemplate", { templateId, changes: clone(changes) }, { keys: [`measure:${templateId}`], softFail: true });
+    },
+    removeMeasureTemplate(templateId) {
+      if (!templateId) return Promise.resolve();
+      mirror.measureTemplates.delete(templateId);
+      return enqueue("removeMeasureTemplate", { templateId }, { keys: [`measure:${templateId}`], softFail: true });
+    },
+    sendMeasureLine(line) {
+      ownMeasureLine = clone(line);
+      sendOwnMeasureLine();
+      return Promise.resolve();
+    },
+    onMeasureLines(callback) {
+      listeners.measureLines.add(callback);
+      if (everSynced) queueMicrotask(() => {
+        if (listeners.measureLines.has(callback)) safeCall(callback, clone([...mirror.measureLines].map(([owner, line]) => ({ owner, ...line }))));
+      });
+      return function unsubscribe() {
+        listeners.measureLines.delete(callback);
+      };
+    },
+    onMeasureTemplates(callback) {
+      listeners.measureTemplates.add(callback);
+      if (everSynced) queueMicrotask(() => {
+        if (listeners.measureTemplates.has(callback)) safeCall(callback, clone([...mirror.measureTemplates.values()]));
+      });
+      return function unsubscribe() {
+        listeners.measureTemplates.delete(callback);
       };
     },
     // 只送公開的名稱與敵友；GM 的 HP 與先攻值留在 GM 瀏覽器。

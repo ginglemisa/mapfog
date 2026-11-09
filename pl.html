@@ -300,8 +300,9 @@
       }
     }
   </style>
-  <link rel="stylesheet" href="toolbar-ui.css?v=20261021-icons">
+  <link rel="stylesheet" href="toolbar-ui.css?v=20261109-measure">
   <link rel="stylesheet" href="map-adjust.css?v=20261021-left-panels">
+  <link rel="stylesheet" href="measure.css?v=20261109-house-rule">
 </head>
 <body class="player-page">
   <div id="viewport" class="viewport">
@@ -398,17 +399,19 @@
     <div class="map-adjust-note">只影響這台裝置的地圖底圖顯示，不會同步給其他人。</div>
   </div>
   <script src="sync-mode.js?v=20261021-lanroom"></script>
-  <script src="firebase-sync.js?v=20261021-lanroom"></script>
+  <script src="firebase-sync.js?v=20261109-shared-line"></script>
   <script src="local-store.js"></script>
-  <script src="lan-sync.js?v=20261021-lanroom"></script>
+  <script src="lan-sync.js?v=20261109-shared-line"></script>
   <script src="connection-status.js?v=20261021-lanroom"></script>
   <script src="image-store.js?v=20261021-lanroom"></script>
   <script src="dice.js?v=20261021-icons"></script>
   <script src="map-adjust.js?v=20261021-toolbar-active"></script>
   <script src="image-processing.js?v=20261021-compression"></script>
-  <script src="player.js?v=20261021-lanroom"></script>
+  <script src="player.js?v=20261109-house-rule"></script>
   <script src="initiative-sync.js?v=20261021-icons"></script>
-  <script src="panel-layout.js?v=20261021-left-panels"></script>
+  <script src="measure-core.js?v=20261109-house-rule"></script>
+  <script src="measure.js?v=20261109-house-rule"></script>
+  <script src="panel-layout.js?v=20261109-measure"></script>
   <script>
     // 讓網頁斷網時也能重新整理（只在 https 或 127.0.0.1 等網址有效，http 區網位址會自動略過；LAN 模式不需要它也能使用）。
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch((error) => console.warn("[MapFog 離線]", error));

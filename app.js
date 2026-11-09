@@ -28,6 +28,7 @@ const gridPanelCloseBtn = document.getElementById("gridPanelCloseBtn");
 const gridEnabled = document.getElementById("gridEnabled");
 const gridSquareBtn = document.getElementById("gridSquareBtn");
 const gridHexBtn = document.getElementById("gridHexBtn");
+const gridTenFoot = document.getElementById("gridTenFoot");
 const gridWhiteBtn = document.getElementById("gridWhiteBtn");
 const gridBlackBtn = document.getElementById("gridBlackBtn");
 const gridOpacity = document.getElementById("gridOpacity");
@@ -267,6 +268,8 @@ function createDefaultGridSettings() {
     opacity: 0.45,
     size: 80,
     lineWidth: 1,
+    tenFoot: false,
+    diagonalHouseRule: false,
     offsetX: 0,
     offsetY: 0
   };
@@ -282,7 +285,9 @@ function normalizeGridSettings(settings = {}) {
     size: clamp(Number(settings.size ?? defaults.size), 24, 240),
     lineWidth: clamp(Number(settings.lineWidth ?? defaults.lineWidth), 1, 20),
     offsetX: clamp(Number(settings.offsetX ?? defaults.offsetX), -240, 240),
-    offsetY: clamp(Number(settings.offsetY ?? defaults.offsetY), -240, 240)
+    offsetY: clamp(Number(settings.offsetY ?? defaults.offsetY), -240, 240),
+    tenFoot: Boolean(settings.tenFoot),
+    diagonalHouseRule: Boolean(settings.diagonalHouseRule)
   };
 }
 
@@ -703,6 +708,12 @@ function updateGridControls() {
   gridEnabled.checked = gridSettings.enabled;
   gridSquareBtn.classList.toggle("active", gridSettings.type === "square");
   gridHexBtn.classList.toggle("active", gridSettings.type === "hex");
+  if (gridTenFoot) {
+    gridTenFoot.checked = gridSettings.tenFoot;
+    // 六角形無法切成四個小六角形，這個選項只適用方格。
+    gridTenFoot.disabled = gridSettings.type === "hex";
+    gridTenFoot.closest("label").title = gridTenFoot.disabled ? "六角格無法細分成四格，只有方格能使用" : "";
+  }
   gridWhiteBtn.classList.toggle("active", gridSettings.color === "white");
   gridBlackBtn.classList.toggle("active", gridSettings.color === "black");
   gridOpacity.value = Math.round(gridSettings.opacity * 100);
@@ -725,6 +736,7 @@ function setGridSettings(nextSettings, options = {}) {
   gridSettings = normalizeGridSettings({ ...gridSettings, ...nextSettings });
   drawGrid();
   updateGridControls();
+  window.dispatchEvent(new Event("mapfog:view-change"));
 
   if (options.sync !== false) {
     broadcastGridSettings();
@@ -1495,6 +1507,7 @@ function applyTransform() {
   zoomValue.textContent = `${Math.round(scale * 100)}%`;
   zoomRange.value = Math.round(scale * 100);
   scheduleViewStatePersist();
+  window.dispatchEvent(new Event("mapfog:view-change"));
 }
 
 function setScale(nextScale, centerClientX = null, centerClientY = null) {
@@ -1866,6 +1879,8 @@ async function applyRemoteMapState(mapState, options = {}) {
 async function loadImageFromDataUrl(dataUrl) {
   // 成功解碼處理後的圖片，才替換目前的地圖。
   const img = await loadImage(dataUrl);
+  // 範圍的位置是舊地圖的座標，換地圖就不再適用。
+  window.MapFogMeasure?.clearAllTemplates();
   clearPendingDraws();
   currentImage = img;
   currentMapDataUrl = dataUrl;
@@ -2680,6 +2695,10 @@ gridEnabled?.addEventListener("change", () => {
   setGridSettings({ enabled: gridEnabled.checked });
 });
 
+gridTenFoot?.addEventListener("change", () => {
+  setGridSettings({ tenFoot: gridTenFoot.checked });
+});
+
 gridSquareBtn?.addEventListener("click", () => {
   setGridSettings({ type: "square" });
 });
@@ -2765,6 +2784,20 @@ sendPlayersToRoomBtn?.addEventListener("click", sendPlayersToCurrentRoom);
 updateBrushLabel();
 updateModeButton();
 updateModeNote();
+// 測量工具（measure.js）用這組介面讀地圖狀態；地圖視角或格線一變就會收到 mapfog:view-change。
+window.MapFogHost = {
+  getGrid: () => gridSettings,
+  getView: () => ({ scale, offsetX, offsetY, rotation: viewRotation }),
+  getMapSize: () => ({ width: mapCanvas.width, height: mapCanvas.height }),
+  hasMap: () => Boolean(currentImage),
+  toMapPoint: eventToCanvasPoint,
+  isRemoteRoom: IS_REMOTE_ROOM,
+  storagePrefix: LOCAL_CACHE_PREFIX,
+  whenSyncReady: whenFirebaseReady,
+  // 只有 GM 頁有這個函式：斜走房規影響大家共用的範圍，由 GM 決定。
+  setDiagonalHouseRule: (enabled) => setGridSettings({ diagonalHouseRule: enabled })
+};
+
 updateGridControls();
 setGridPanelOpen(false);
 updateOlroomCacheControls();

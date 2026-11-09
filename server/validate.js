@@ -12,11 +12,15 @@ const COORD_LIMIT = 100000;
 const MAP_SIDE_LIMIT = 20000;
 const MAX_STROKES_PER_BATCH = 5000;
 const MAX_INITIATIVE_ENTRIES = 300;
+const MAX_MEASURE_LINE_CELLS = 2000;
 
 // 圖片雜湊以外可以修改的 token 欄位，跟 app.js／player.js 的 TOKEN_SYNC_KEYS 一致。
 const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order", "locked"];
 // 玩家只能改未鎖定 token 的位置、大小與形狀。
 const PLAYER_EDITABLE_TOKEN_KEYS = ["x", "y", "size", "shape"];
+// 地圖上的範圍（錐形、球形、發散、方形）：GM 與玩家都能新增、移動、旋轉與刪除。
+const MEASURE_SHAPES = new Set(["cone", "circle", "emanation", "square"]);
+const MEASURE_TEMPLATE_KEYS = ["x", "y", "size", "angle", "order"];
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -129,7 +133,9 @@ function sanitizeGridSettings(settings) {
     size: clamp(finite(settings.size) ?? 80, 24, 240),
     lineWidth: clamp(finite(settings.lineWidth) ?? 1, 1, 20),
     offsetX: clamp(finite(settings.offsetX) ?? 0, -240, 240),
-    offsetY: clamp(finite(settings.offsetY) ?? 0, -240, 240)
+    offsetY: clamp(finite(settings.offsetY) ?? 0, -240, 240),
+    tenFoot: Boolean(settings.tenFoot),
+    diagonalHouseRule: Boolean(settings.diagonalHouseRule)
   };
 }
 
@@ -197,6 +203,50 @@ function sanitizeNewToken(token, role) {
   return result;
 }
 
+function sanitizeMeasureField(key, value) {
+  const number = finite(value);
+  if (number === null) return undefined;
+  switch (key) {
+    case "x":
+    case "y": return clamp(number, -COORD_LIMIT, COORD_LIMIT);
+    case "size": return clamp(Math.round(number * 2) / 2, 0.5, 100);
+    case "angle": return ((number % 360) + 360) % 360;
+    case "order": return number;
+    default: return undefined;
+  }
+}
+
+function sanitizeMeasureChanges(changes) {
+  if (!isPlainObject(changes)) return {};
+  const cleaned = {};
+  for (const key of MEASURE_TEMPLATE_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(changes, key)) continue;
+    const value = sanitizeMeasureField(key, changes[key]);
+    if (value !== undefined) cleaned[key] = value;
+  }
+  return cleaned;
+}
+
+function sanitizeMeasureTemplate(template) {
+  if (!isPlainObject(template) || !isValidId(template.id) || !MEASURE_SHAPES.has(template.shape)) return null;
+  return { id: template.id, shape: template.shape, x: 0, y: 0, size: 1, angle: 0, order: 0, ...sanitizeMeasureChanges(template) };
+}
+
+// 畫面上正在顯示的直線或曲線；格式不對一律當成沒有線。
+function sanitizeMeasureLine(line) {
+  if (!isPlainObject(line) || (line.kind !== "line" && line.kind !== "path") || !Array.isArray(line.cells)) return null;
+  if (line.cells.length < 2 || line.cells.length > MAX_MEASURE_LINE_CELLS) return null;
+  if (line.kind === "line" && line.cells.length !== 2) return null;
+  const cells = [];
+  for (const cell of line.cells) {
+    const col = finite(cell?.col);
+    const row = finite(cell?.row);
+    if (col === null || row === null) return null;
+    cells.push({ col: clamp(Math.trunc(col), -COORD_LIMIT, COORD_LIMIT), row: clamp(Math.trunc(row), -COORD_LIMIT, COORD_LIMIT) });
+  }
+  return { kind: line.kind, cells };
+}
+
 function sanitizeDiceRoll(roll, role) {
   if (!isPlainObject(roll) || !isValidId(roll.id)) return null;
   const rolls = Array.isArray(roll.rolls)
@@ -233,5 +283,8 @@ module.exports = {
   sanitizeInitiativeState,
   sanitizeTokenChanges,
   sanitizeNewToken,
+  sanitizeMeasureTemplate,
+  sanitizeMeasureChanges,
+  sanitizeMeasureLine,
   sanitizeDiceRoll
 };

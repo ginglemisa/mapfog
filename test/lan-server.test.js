@@ -412,3 +412,130 @@ test("靜態網頁與 API：只提供網頁檔案，擋下路徑穿越、資料�
 
   await assert.rejects(() => connect({ role: "player", origin: "http://evil.example.com" }), /403/);
 });
+
+test("地圖範圍：GM 與玩家都能新增、移動、旋轉與刪除，中途加入也看得到", async (t) => {
+  const env = await setupRoom(t);
+  const player = await env.connect({ role: "player" });
+  const template = { id: "tpl-1", shape: "cone", x: 200, y: 300, size: 3, angle: 0, order: 1 };
+
+  assert.equal((await player.op("addMeasureTemplate", { template })).ok, true);
+  const added = await env.gm.waitFor((message) => message.t === "measureAdd");
+  assert.deepEqual(added.template, template);
+
+  assert.equal((await env.gm.op("updateMeasureTemplate", { templateId: "tpl-1", changes: { x: 280, angle: 45 } })).ok, true);
+  const patched = await player.waitFor((message) => message.t === "measurePatch");
+  assert.deepEqual(patched.changes, { x: 280, angle: 45 });
+
+  const late = await env.connect({ role: "player" });
+  assert.deepEqual(late.welcome.state.measureTemplates, [{ ...template, x: 280, angle: 45 }]);
+
+  assert.equal((await player.op("removeMeasureTemplate", { templateId: "tpl-1" })).ok, true);
+  await env.gm.waitFor((message) => message.t === "measureRemove" && message.templateId === "tpl-1");
+});
+
+test("地圖範圍：格式檢查，已刪除的範圍不會被晚到的更新救回來", async (t) => {
+  const env = await setupRoom(t);
+  const bad = await env.gm.op("addMeasureTemplate", { template: { id: "tpl-bad", shape: "hexagon", x: 0, y: 0 } });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, "bad-request");
+
+  await env.gm.op("addMeasureTemplate", { template: { id: "tpl-2", shape: "circle", x: 10, y: 10, size: 1.3, angle: 725, extra: "ignored" } });
+  const viewer = await env.connect({ role: "player" });
+  const [template] = viewer.welcome.state.measureTemplates;
+  assert.equal(template.size, 1.5);
+  assert.equal(template.angle, 5);
+  assert.equal(template.extra, undefined);
+
+  await env.gm.op("removeMeasureTemplate", { templateId: "tpl-2" });
+  const late = await viewer.op("updateMeasureTemplate", { templateId: "tpl-2", changes: { x: 99 } });
+  assert.equal(late.ok, false);
+  assert.equal(late.code, "gone");
+  const correction = await viewer.waitFor((message) => message.t === "measure" && message.templateId === "tpl-2");
+  assert.equal(correction.template, null);
+});
+
+test("地圖範圍：清除房間後一起清掉，伺服器重啟後保留", async (t) => {
+  const dataDir = makeDataDir();
+  const first = await startServer(t, { dataDir, keepData: true });
+  const gm = await first.connect({ role: "gm", adminKey: ADMIN_KEY });
+  await gm.op("addMeasureTemplate", { template: { id: "tpl-3", shape: "square", x: 40, y: 40, size: 2, angle: 0 } });
+  await first.server.close();
+
+  const second = await startServer(t, { dataDir });
+  const gm2 = await second.connect({ role: "gm", adminKey: ADMIN_KEY });
+  assert.equal(gm2.welcome.state.measureTemplates.length, 1);
+  await gm2.op("clearRoomState");
+  const viewer = await second.connect({ role: "player" });
+  assert.deepEqual(viewer.welcome.state.measureTemplates, []);
+});
+
+test("地圖範圍：發散是可接受的形狀", async (t) => {
+  const env = await setupRoom(t);
+  const ack = await env.gm.op("addMeasureTemplate", { template: { id: "tpl-e", shape: "emanation", x: 40, y: 40, size: 2, angle: 0 } });
+  assert.equal(ack.ok, true);
+  const viewer = await env.connect({ role: "player" });
+  assert.equal(viewer.welcome.state.measureTemplates[0].shape, "emanation");
+});
+
+test("格線的「一格 10 呎」會同步給玩家，舊資料預設關閉", async (t) => {
+  const env = await setupRoom(t);
+  const player = await env.connect({ role: "player" });
+  await env.gm.op("sendGridSettings", { grid: { enabled: true, type: "square", size: 80, tenFoot: true } });
+  const update = await player.waitFor((message) => message.t === "grid");
+  assert.equal(update.grid.tenFoot, true);
+  await env.gm.op("sendGridSettings", { grid: { enabled: true, type: "square", size: 80 } });
+  const late = await env.connect({ role: "player" });
+  assert.equal(late.welcome.state.grid.tenFoot, false);
+});
+
+test("直線與曲線：同步給其他畫面，中途加入看得到，斷線自動移除，不寫進硬碟", async (t) => {
+  const env = await setupRoom(t);
+  const player = await env.connect({ role: "player" });
+  const line = { kind: "line", cells: [{ col: 1, row: 2 }, { col: 4, row: 5 }] };
+  player.send({ t: "measureLine", line });
+  const shown = await env.gm.waitFor((message) => message.t === "measureLine");
+  assert.equal(shown.owner, player.clientId);
+  assert.deepEqual(shown.line, line);
+  assert.equal(await player.expectNone((message) => message.t === "measureLine"), true);
+
+  const late = await env.connect({ role: "player" });
+  assert.deepEqual(late.welcome.state.measureLines, [{ owner: player.clientId, ...line }]);
+
+  // 同一個畫面畫新的線會取代舊的線。
+  const path = { kind: "path", cells: [{ col: 0, row: 0 }, { col: 1, row: 1 }, { col: 2, row: 1 }] };
+  player.send({ t: "measureLine", line: path });
+  await late.waitFor((message) => message.t === "measureLine" && message.line?.kind === "path");
+
+  player.close();
+  const gone = await late.waitFor((message) => message.t === "measureLine" && message.line === null);
+  assert.equal(gone.owner, player.clientId);
+  const after = await env.connect({ role: "player" });
+  assert.deepEqual(after.welcome.state.measureLines, []);
+});
+
+test("直線與曲線：格式不對的線不會轉送，送 null 會清除", async (t) => {
+  const env = await setupRoom(t);
+  const player = await env.connect({ role: "player" });
+  player.send({ t: "measureLine", line: { kind: "line", cells: [{ col: 1, row: 2 }] } });
+  player.send({ t: "measureLine", line: { kind: "zigzag", cells: [{ col: 1, row: 2 }, { col: 2, row: 2 }] } });
+  player.send({ t: "measureLine", line: { kind: "line", cells: [{ col: "x", row: 2 }, { col: 2, row: 2 }] } });
+  assert.equal(await env.gm.expectNone((message) => message.t === "measureLine"), true);
+
+  player.send({ t: "measureLine", line: { kind: "line", cells: [{ col: 1, row: 2 }, { col: 2, row: 2 }] } });
+  await env.gm.waitFor((message) => message.t === "measureLine" && message.line);
+  player.send({ t: "measureLine", line: null });
+  await env.gm.waitFor((message) => message.t === "measureLine" && message.line === null);
+});
+
+test("斜走房規會同步給玩家，只有 GM 能改，舊資料預設關閉", async (t) => {
+  const env = await setupRoom(t);
+  const player = await env.connect({ role: "player" });
+  await env.gm.op("sendGridSettings", { grid: { enabled: true, type: "square", size: 80, diagonalHouseRule: true } });
+  const update = await player.waitFor((message) => message.t === "grid");
+  assert.equal(update.grid.diagonalHouseRule, true);
+  const denied = await player.op("sendGridSettings", { grid: { enabled: true, type: "square", size: 80, diagonalHouseRule: false } });
+  assert.equal(denied.ok, false);
+  await env.gm.op("sendGridSettings", { grid: { enabled: true, type: "square", size: 80 } });
+  const late = await env.connect({ role: "player" });
+  assert.equal(late.welcome.state.grid.diagonalHouseRule, false);
+});
