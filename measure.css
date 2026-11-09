@@ -225,6 +225,15 @@
   font-size: 14px;
 }
 
+.measure-list li {
+  min-height: 38px;
+  cursor: pointer;
+}
+
+.measure-list li.selected {
+  box-shadow: 0 0 0 1px #38bdf8 inset;
+}
+
 .measure-swatch {
   width: 12px;
   height: 12px;
