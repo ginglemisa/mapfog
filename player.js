@@ -109,6 +109,7 @@ let tokenDragOffsetX = 0;
 let tokenDragOffsetY = 0;
 // 按下 token 之後真的移動過才算拖曳；只是點選不會改動它的位置。
 let tokenDragMoved = false;
+let renderedTokenRotation = 0;
 let firebaseSync = null;
 let tokenDragSyncTimer = null;
 let tokenControlSyncTimer = null;
@@ -634,7 +635,7 @@ function getTokenMapBounds() {
 function getTokenPlacement(token) {
   if (!TokenGrid.isActive(gridSettings)) return token;
   const placed = TokenGrid.placement(gridSettings, token, getTokenMapBounds());
-  return draggingTokenId === token.id && tokenDragMoved ? { ...placed, x: token.x, y: token.y } : placed;
+  return draggingTokenId === token.id && tokenDragMoved ? TokenGrid.placedAt(placed, token.x, token.y) : placed;
 }
 
 function setLocalTokenPosition(tokenId, position, options) {
@@ -768,12 +769,13 @@ function renderTokens() {
     const imageUrl = getTokenImageUrl(token);
     const image = element.querySelector("img"); if (image && imageUrl && image.src !== imageUrl) image.src = imageUrl;
     const placed = getTokenPlacement(token);
-    element.style.width = `${placed.size}px`; element.style.height = `${placed.size}px`;
-    element.style.transform = `translate(${placed.x - placed.size / 2}px, ${placed.y - placed.size / 2}px) rotate(var(--token-rotation, 0deg))`;
+    const frame = TokenGrid.elementFrame(placed, viewRotation);
+    element.style.width = `${frame.width}px`; element.style.height = `${frame.height}px`;
+    element.style.transform = `translate(${frame.left}px, ${frame.top}px) rotate(var(--token-rotation, 0deg))`;
+    element.style.clipPath = frame.clipPath;
     element.title = token.name;
     element.classList.toggle("square", placed.shape === "square"); element.classList.toggle("hex", placed.shape === "hex");
     element.classList.toggle("selected", token.id === tokenCollectionState.selectedTokenId);
-    element.classList.toggle("fit-hex-cell", TokenGrid.shapeFollowsGrid(gridSettings));
     element.classList.toggle("snap-selected", snapActive && token.id === tokenCollectionState.selectedTokenId && !token.locked);
     element.classList.toggle("locked", token.locked);
   }
@@ -990,7 +992,11 @@ function applyTransform() {
   canvasHolder.style.transform = transform;
   // Counter-rotate around each token's center while its position follows the map.
   canvasHolder.style.setProperty("--token-rotation", `${-viewRotation}deg`);
-  canvasHolder.classList.toggle("view-sideways", viewRotation % 180 !== 0);
+  // 六角格 token 的方框與外框跟著畫面方向計算，旋轉後要重畫。
+  if (renderedTokenRotation !== viewRotation) {
+    renderedTokenRotation = viewRotation;
+    renderTokens();
+  }
   scheduleViewStatePersist();
   window.dispatchEvent(new Event("mapfog:view-change"));
 }
