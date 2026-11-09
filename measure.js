@@ -1,5 +1,5 @@
 // 測量工具（GM 與玩家頁共用）：只有 GM 開啟格線、而且有地圖時才顯示。
-// - 直線、曲線：所有人都看得到，每個畫面同時只留一條，量完留著，下一次量或關掉工具時清除。
+// - 直線、曲線：所有人都看得到，每個畫面同時只留一條；關掉工具或面板後仍留著，下一次量時取代，或在面板清單按 X 移除。
 // - 錐形、圓形、方形：地圖上的範圍，所有人都看得到；移動、旋轉與刪除限放置的人與 GM。
 // 線條、文字與把手畫在跟螢幕同尺寸的覆蓋層上，粗細與字級不受地圖縮放影響。
 (() => {
@@ -34,7 +34,10 @@
     circle: { label: "球形", color: "168, 85, 247" },
     square: { label: "方形", color: "34, 197, 94" }
   };
-  const TOOL_COLORS = { line: "56, 189, 248", path: "250, 204, 21" };
+  const LINES = {
+    line: { label: "直線", color: "56, 189, 248" },
+    path: { label: "曲線", color: "250, 204, 21" }
+  };
   const HINTS = {
     idle: "拖曳範圍可以移動，拖曳 ↻ 可以旋轉，選取後按 Delete 刪除。",
     line: "在地圖上按住，從一格拖到另一格，顯示相距幾格。",
@@ -51,6 +54,8 @@
   let tool = null;
   // 自己畫的直線或曲線：{ kind: "line", from, to } 或 { kind: "path", cells }（格子座標）。
   let measurement = null;
+  // 清單上目前顯示的那條線的名稱，用來判斷清單要不要重畫。
+  let shownLineName = null;
   // 其他畫面正在顯示的線。這裡沒有帳號，所以「一條線」是對應一個開著的畫面。
   let otherLines = [];
   let lineChannel = null;
@@ -65,7 +70,7 @@
   let modalShape = null;
   // 圓形的放法：emanation 放格子中心（發散），circle 放格線交點（球形）。
   let circleMode = "emanation";
-  let lastGridKey = "";
+  let lastLineKey = "";
   const cellCache = new Map();
 
   const button = createToolbarButton();
@@ -354,8 +359,16 @@
     scheduleRender();
   }
 
+  function clearMeasurement() {
+    if (session && !session.templateId) cancelForPinch();
+    measurement = null;
+    scheduleRender();
+  }
+
+  // 全部清除與換地圖都會走這裡，自己的線也一起清掉。
   function clearAllTemplates() {
     for (const templateId of [...templates.keys()]) removeTemplate(templateId);
+    clearMeasurement();
   }
 
   // ---- 繪製 ----
@@ -508,9 +521,21 @@
     return points[points.length - 1];
   }
 
+  function lineCount(line, model) {
+    const grid = host.getGrid();
+    return line.kind === "line"
+      ? core.lineCost(line.cells[0], line.cells[1], model, grid)
+      : core.pathCost(line.cells, model, grid);
+  }
+
+  function ownLineName() {
+    const line = currentLine();
+    return line ? `${lineCount(line, currentModel())} 格${LINES[line.kind].label}` : null;
+  }
+
   function drawMeasuredLine(line, model) {
     const points = line.cells.map((cell) => toScreen(model.center(cell)));
-    const color = `rgb(${TOOL_COLORS[line.kind]})`;
+    const color = `rgb(${LINES[line.kind].color})`;
     ctx.beginPath();
     points.forEach((point, index) => {
       if (index) ctx.lineTo(point.x, point.y);
@@ -521,16 +546,14 @@
     strokeWithHalo(color, 3);
     drawDot(points[0], color);
     drawDot(points[points.length - 1], color);
-    const grid = host.getGrid();
-    const count = line.kind === "line"
-      ? core.lineCost(line.cells[0], line.cells[1], model, grid)
-      : core.pathCost(line.cells, model, grid);
-    drawLabel(`${count} 格`, midpointOf(points));
+    drawLabel(`${lineCount(line, model)} 格`, midpointOf(points));
   }
 
   function render() {
     resizeOverlay();
     ctx.clearRect(0, 0, viewport.clientWidth, viewport.clientHeight);
+    // 線的格數會隨拖曳、房規與格線改變；只有名稱變了才重畫清單。
+    if (ownLineName() !== shownLineName) renderList();
     if (!available()) return;
     const model = templateModel();
     const { width, height } = host.getMapSize();
@@ -807,30 +830,50 @@
     return element;
   }
 
-  function renderList() {
-    list.replaceChildren(...orderedTemplates().map((template) => {
-      const item = document.createElement("li");
-      const swatch = document.createElement("span");
-      swatch.className = "measure-swatch";
-      swatch.style.background = `rgb(${SHAPES[template.shape].color})`;
-      const name = document.createElement("span");
-      name.className = "measure-item-name";
-      name.textContent = `${template.size} 格${SHAPES[template.shape].label}`;
+  // onRemove 省略時不放 X（別人放的範圍）。
+  function createListRow(color, text, removeTitle, onRemove) {
+    const item = document.createElement("li");
+    const swatch = document.createElement("span");
+    swatch.className = "measure-swatch";
+    swatch.style.background = `rgb(${color})`;
+    const name = document.createElement("span");
+    name.className = "measure-item-name";
+    name.textContent = text;
+    item.append(swatch, name);
+    if (onRemove) {
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "measure-icon-button";
-      remove.title = "移除這個範圍";
-      remove.setAttribute("aria-label", `移除 ${name.textContent}`);
+      remove.title = removeTitle;
+      remove.setAttribute("aria-label", `移除 ${text}`);
       remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
-      remove.addEventListener("click", () => removeTemplate(template.id));
-      item.append(swatch, name);
-      if (canModify(template)) item.append(remove);
+      remove.addEventListener("click", onRemove);
+      item.append(remove);
+    }
+    return item;
+  }
+
+  function renderList() {
+    shownLineName = ownLineName();
+    const rows = orderedTemplates().map((template) => {
+      const item = createListRow(
+        SHAPES[template.shape].color,
+        `${template.size} 格${SHAPES[template.shape].label}`,
+        "移除這個範圍",
+        canModify(template) ? () => removeTemplate(template.id) : null
+      );
       item.classList.toggle("selected", template.id === selectedTemplateId);
       item.addEventListener("click", () => selectTemplate(template.id));
       return item;
-    }));
-    emptyNote.hidden = templates.size > 0;
-    clearButton.hidden = !orderedTemplates().some(canModify);
+    });
+    if (shownLineName) {
+      const item = createListRow(LINES[measurement.kind].color, shownLineName, "移除這條線", clearMeasurement);
+      item.classList.add("measure-line-item");
+      rows.unshift(item);
+    }
+    list.replaceChildren(...rows);
+    emptyNote.hidden = rows.length > 0;
+    clearButton.hidden = !shownLineName && !orderedTemplates().some(canModify);
     clearButton.textContent = isGm ? "全部清除" : "清除我的";
   }
 
@@ -879,7 +922,6 @@
   function setTool(next) {
     if (session && !session.templateId) cancelForPinch();
     tool = next;
-    measurement = null;
     updateToolUi();
     scheduleRender();
   }
@@ -1005,10 +1047,11 @@
       closeModal();
       if (session) cancelForPinch();
     }
-    const key = gridKey(host.getGrid());
-    if (key !== lastGridKey) {
-      lastGridKey = key;
-      // 格子換了，用舊格子記的線已經沒有意義。
+    const { width, height } = host.getMapSize();
+    const key = `${gridKey(host.getGrid())}|${width}x${height}`;
+    if (key !== lastLineKey) {
+      lastLineKey = key;
+      // 格子或地圖換了，線記的格子座標已經沒有意義。
       measurement = null;
     }
     scheduleRender();

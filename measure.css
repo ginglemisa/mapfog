@@ -230,6 +230,10 @@
   cursor: pointer;
 }
 
+.measure-list li.measure-line-item {
+  cursor: default;
+}
+
 .measure-list li.selected {
   box-shadow: 0 0 0 1px #38bdf8 inset;
 }
