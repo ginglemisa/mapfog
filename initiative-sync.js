@@ -359,11 +359,11 @@
   function createToolbarButton() {
     const button = document.createElement("button");
     button.id = isGmPage ? "initiativePanelBtn" : "initiativePublicPanelBtn";
-    button.className = "tool-button initiative-tool-button active";
+    button.className = "tool-button initiative-tool-button";
     button.type = "button";
     button.title = "先攻順序";
     button.setAttribute("aria-label", "先攻順序");
-    button.setAttribute("aria-expanded", "true");
+    button.setAttribute("aria-expanded", "false");
     button.innerHTML = `
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M10 6h10"/>
@@ -396,6 +396,7 @@
     panel.id = "initiativePanel";
     panel.className = "mapfog-initiative-panel gm-initiative-panel";
     panel.setAttribute("aria-label", "先攻管理");
+    panel.hidden = true;
     panel.innerHTML = `
       <div class="initiative-panel-header" data-panel-drag-handle="true" title="拖曳移動先攻管理">
         <div class="initiative-heading">
@@ -524,6 +525,7 @@
     panel.id = "initiativePublicPanel";
     panel.className = "mapfog-initiative-panel public-initiative-panel";
     panel.setAttribute("aria-label", "先攻順序");
+    panel.hidden = true;
     panel.innerHTML = `
       <div class="initiative-panel-header compact">
         <div>

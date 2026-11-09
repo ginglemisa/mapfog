@@ -2934,7 +2934,8 @@ tokenUnlockAllBtn?.addEventListener("click", () => {
 });
 
 gridEnabled?.addEventListener("change", () => {
-  setGridSettings({ enabled: gridEnabled.checked });
+  // 打開格線時 token 也跟著對齊格子；之後 GM 仍可以單獨取消格子化。
+  setGridSettings(gridEnabled.checked ? { enabled: true, tokenSnap: true } : { enabled: false });
 });
 
 gridTenFoot?.addEventListener("change", () => {
