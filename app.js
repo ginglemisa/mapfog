@@ -2427,7 +2427,8 @@ function pointerUp(event) {
 }
 
 function handleWheelZoom(event) {
-  if (!currentImage) return;
+  // 滑鼠在左邊工具列上時留給工具列自己捲動。
+  if (!currentImage || floatingToolbar?.contains(event.target)) return;
   event.preventDefault();
   const delta = event.deltaY < 0 ? 1.1 : 0.9;
   setScale(scale * delta, event.clientX, event.clientY);
@@ -2814,11 +2815,11 @@ const sideToolbar = document.getElementById("sideToolbar");
 setupToolbarCollapse(floatingToolbar, toolbarToggleBtn, "mapfog.ui.gm.toolbarCollapsed", "工具列");
 setupToolbarCollapse(sideToolbar, document.getElementById("sideToolbarToggleBtn"), "mapfog.ui.gm.sideToolbarCollapsed", "遊戲工具列");
 
-// 左上工具列的最大寬度要讓出右上那組的位置。
-if (sideToolbar && "ResizeObserver" in window) {
+// 先攻與平板版抽屜預設排在左邊工具列的右側。
+if (floatingToolbar && "ResizeObserver" in window) {
   new ResizeObserver(() => {
-    document.documentElement.style.setProperty("--side-toolbar-space", `${sideToolbar.offsetWidth + 8}px`);
-  }).observe(sideToolbar);
+    document.documentElement.style.setProperty("--main-toolbar-space", `${Math.round(floatingToolbar.getBoundingClientRect().right) + 8}px`);
+  }).observe(floatingToolbar);
 }
 
 // Keep the native grid/token button and ARIA state in sync with tablet drawers.

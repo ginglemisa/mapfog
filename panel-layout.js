@@ -1,6 +1,6 @@
 // 面板的位置與顯示規則（GM 與玩家頁共用）：
 // - 操作地圖（擦霧、補霧、拖曳地圖或 token、雙指縮放）時暫時隱藏所有面板，放開後恢復；原本關著的不會被打開。
-// - GM 電腦版：面板可以同時開，依打開順序排列、不互相重疊。左上工具列的面板（地圖設定、格線、地圖調整）由左往右，
+// - GM 電腦版：面板可以同時開，依打開順序排列、不互相重疊。左邊工具列的面板（地圖設定、格線、地圖調整）從工具列右側由左往右，
 //   Token 與骰子由右往左；放不下就排到已開面板下方。先攻面板位置由它自己決定（可拖曳），其他面板避開它。
 // - GM 右下角模式按鈕的高度提供給平板版抽屜，讓抽屜停在按鈕上方。
 // - 玩家頁：骰子、Token、測量工具面板在同一個位置，同時間只開一個。
@@ -113,9 +113,10 @@
 
       const mainRect = mainToolbar?.getBoundingClientRect();
       const sideRect = sideToolbar?.getBoundingClientRect();
-      const anchorLeft = mainRect ? mainRect.left : EDGE;
+      const anchorLeft = mainRect ? mainRect.right + GAP : EDGE;
       const anchorRight = sideRect ? sideRect.right : window.innerWidth - EDGE;
-      const firstTop = Math.max(mainRect?.bottom || 0, sideRect?.bottom || 0, 56) + GAP;
+      // 左邊工具列是直的，面板排在它右側，所以只要避開上方的遊戲工具列。
+      const firstTop = Math.max(sideRect?.bottom || 0, 56) + GAP;
       const screenBottom = window.innerHeight - EDGE;
       // 不能蓋到的區域：先攻面板、右下角模式按鈕，以及已經排好的面板。
       const placed = [initiativePanel, measurePanel, dock]
@@ -145,7 +146,7 @@
         const naturalHeight = panel.offsetHeight;
         const fromLeft = LEFT_PANEL_IDS.includes(panel.id);
 
-        // 左上工具列的面板由左往右排，Token 與骰子由右往左排；最上面一排放不下，再找已排面板下方的空位。
+        // 左邊工具列的面板由左往右排，Token 與骰子由右往左排；最上面一排放不下，再找已排面板下方的空位。
         const tops = [firstTop, ...placed.map((rect) => rect.bottom + GAP)].sort((a, b) => a - b);
         const lefts = fromLeft
           ? [anchorLeft, ...placed.map((rect) => rect.right + GAP)].sort((a, b) => a - b)
@@ -160,7 +161,8 @@
         }
         // 畫面真的放不下時才疊在自己那一側的角落，維持在最上層可以操作。
         if (!spot) {
-          const left = fromLeft ? anchorLeft : anchorRight - width;
+          // 窄畫面放不下工具列加面板時，寧可蓋住工具列也不要超出畫面；面板的關閉按鈕要按得到。
+          const left = fromLeft ? Math.max(EDGE, Math.min(anchorLeft, window.innerWidth - EDGE - width)) : anchorRight - width;
           spot = { left, top: firstTop, right: left + width, bottom: Math.min(screenBottom, firstTop + naturalHeight) };
         }
 

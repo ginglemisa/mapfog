@@ -595,11 +595,14 @@
     const maxHeight = Math.max(PANEL_MIN_HEIGHT, viewportHeight - PANEL_MARGIN * 2);
     const width = clamp(Number(layout.width) || 308, PANEL_MIN_WIDTH, maxWidth);
     const height = clamp(Number(layout.height) || 420, PANEL_MIN_HEIGHT, maxHeight);
+    const maxLeft = Math.max(PANEL_MARGIN, viewportWidth - width - PANEL_MARGIN);
+    // 不蓋住左邊工具列（舊版記下的位置也一樣）；畫面窄到放不下時才讓面板優先。
+    const minLeft = Math.min(Math.round(floatingToolbar.getBoundingClientRect().right) + PANEL_MARGIN, maxLeft);
 
     return {
       width,
       height,
-      left: clamp(Number(layout.left) || PANEL_MARGIN, PANEL_MARGIN, Math.max(PANEL_MARGIN, viewportWidth - width - PANEL_MARGIN)),
+      left: clamp(Number(layout.left) || minLeft, minLeft, maxLeft),
       top: clamp(Number(layout.top) || 72, PANEL_MARGIN, Math.max(PANEL_MARGIN, viewportHeight - height - PANEL_MARGIN))
     };
   }

@@ -9,23 +9,29 @@
   scrollbar-width: none;
   touch-action: pan-x;
 }
-/* 左上、右上同時只展開一組（tablet-ui.js）。展開的那組疊在上面，寬度停在另一組的箭頭前面；
-   放不下就橫向捲動，自己的箭頭固定在端點不會被捲走。 */
+/* 左邊工具列是直的，放不下就上下捲動；右上那組放不下就橫向捲動。兩邊的箭頭都固定在端點，不會被捲走。 */
 .gm-page.tablet-layout #floatingToolbar {
   left: max(10px, env(safe-area-inset-left));
-  max-width: var(--tablet-left-toolbar-max, calc(100vw - 20px - var(--side-toolbar-space, 0px)));
+  max-width: none;
+  max-height: calc(100% - 20px - env(safe-area-inset-top));
+  overflow-x: hidden;
+  overflow-y: auto;
+  touch-action: pan-y;
+}
+.gm-page.tablet-layout #floatingToolbar.collapsed {
+  max-height: none;
+  overflow: visible;
 }
 .gm-page.tablet-layout #sideToolbar {
   left: auto;
   right: max(10px, env(safe-area-inset-right));
-  max-width: var(--tablet-right-toolbar-max, none);
+  max-width: calc(100vw - 10px - var(--main-toolbar-space, 74px));
 }
-.gm-page.tablet-layout .floating-toolbar:not(.collapsed) { z-index: 31; }
 .gm-page.tablet-layout .floating-toolbar > .toolbar-toggle {
   position: sticky;
   z-index: 1;
 }
-.gm-page.tablet-layout #floatingToolbar > .toolbar-toggle { left: 0; }
+.gm-page.tablet-layout #floatingToolbar > .toolbar-toggle { top: 0; }
 .gm-page.tablet-layout #sideToolbar > .toolbar-toggle { right: 0; }
 .gm-page.tablet-layout .floating-toolbar::-webkit-scrollbar { display: none; }
 .gm-page.tablet-layout .floating-toolbar .tool-button {
@@ -49,7 +55,7 @@
 .gm-page.tablet-layout .controls-panel .cache-actions button { min-width: 0; min-height: 44px; flex: 1 1 140px; }
 .gm-page.tablet-layout .controls-panel input[type="range"] { min-height: 32px; }
 
-/* 兩個抽屜位置：左上放地圖設定、格線、地圖調整與先攻，右上放 Token 與骰子；
+/* 兩個抽屜位置：左邊工具列右側放地圖設定、格線、地圖調整與先攻，右上放 Token 與骰子；
    左右各開一個，所以寬度不超過半個畫面。停在右下角模式按鈕上方，按鈕保持可見。 */
 .gm-page.tablet-layout .controls-panel,
 .gm-page.tablet-layout .grid-panel,
@@ -63,8 +69,9 @@
 .gm-page.tablet-layout .controls-panel,
 .gm-page.tablet-layout .grid-panel,
 .gm-page.tablet-layout .map-adjust-panel {
-  left: max(12px, env(safe-area-inset-left));
+  left: var(--main-toolbar-space, 74px);
   right: auto;
+  width: min(362px, calc(50vw - 6px - var(--main-toolbar-space, 74px)));
 }
 .gm-page.tablet-layout .token-panel {
   left: auto;
@@ -77,21 +84,23 @@
 }
 .gm-page.tablet-layout .grid-nudge { grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); }
 .gm-page.tablet-layout .grid-panel-body { grid-template-columns: 136px minmax(0, 1fr); }
+/* 直立的平板上抽屜比較窄，「六角格」不要折成兩行。 */
+.gm-page.tablet-layout :is(#gridSquareBtn, #gridHexBtn) { padding-inline: 2px; white-space: nowrap; }
 .gm-page.tablet-layout .token-panel button { min-height: 44px; }
 .gm-page.tablet-layout .map-adjust-panel .map-adjust-action { min-height: 44px; }
 .gm-page.tablet-layout .map-adjust-panel .map-adjust-close-button { min-width: 44px; width: 44px; height: 44px; }
 .gm-page.tablet-layout .map-adjust-slider input[type="range"] { min-height: 32px; }
 
 /* Specificity beats initiative/dice styles injected dynamically by JS.
-   先攻預設在左上，和左上其他面板互斥；可以拖曳標題列移動、拉邊角調整大小。
+   先攻預設在左邊工具列右側，和左邊其他面板互斥；可以拖曳標題列移動、拉邊角調整大小。
    拖曳或拉過之後，initiative-sync.js 寫入的 inline 位置與大小會蓋過這裡的預設值。 */
 .gm-page.tablet-layout #initiativePanel.gm-initiative-panel {
   position: fixed;
   top: calc(69px + env(safe-area-inset-top));
-  left: max(12px, env(safe-area-inset-left));
+  left: var(--main-toolbar-space, 74px);
   bottom: auto;
   right: auto;
-  width: min(308px, calc(50vw - 18px));
+  width: min(308px, calc(50vw - 6px - var(--main-toolbar-space, 74px)));
   height: min(540px, calc(100dvh - 83px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
   border-radius: 14px; background: rgba(11, 18, 32, .97);
 }
