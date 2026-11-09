@@ -9,6 +9,7 @@ const core = require("../token-grid-core");
 const { createGridModel } = require("../measure-core");
 
 const SQUARE = { enabled: true, tokenSnap: true, type: "square", size: 100, offsetX: 0, offsetY: 0 };
+const TEN_FOOT = { ...SQUARE, tenFoot: true };
 const HEX = { ...SQUARE, type: "hex" };
 const BOUNDS = { width: 100000, height: 100000 };
 const HEX_HEIGHT = Math.sqrt(3) * 50;
@@ -29,58 +30,109 @@ test("開關：要同時開啟格線與格子化才生效", () => {
   assert.equal(core.isActive(undefined), false);
 });
 
-test("尺寸名稱：不認得的值一律當成中", () => {
-  assert.equal(core.normalizeFootprint("small"), "small");
+test("尺寸名稱：不認得的值一律當成小", () => {
+  assert.equal(core.normalizeFootprint("medium"), "medium");
   assert.equal(core.normalizeFootprint("large"), "large");
-  assert.equal(core.normalizeFootprint("toString"), "medium");
-  assert.equal(core.normalizeFootprint(undefined), "medium");
+  assert.equal(core.normalizeFootprint("toString"), "small");
+  assert.equal(core.normalizeFootprint(undefined), "small");
 });
 
-test("方格：小半格、中一格、大 2×2，「一格 10 呎」不影響大小", () => {
-  for (const grid of [SQUARE, { ...SQUARE, tenFoot: true }]) {
-    assert.equal(core.pixelSize(grid, "small", "square"), 50);
-    assert.equal(core.pixelSize(grid, "medium", "square"), 100);
-    assert.equal(core.pixelSize(grid, "large", "square"), 200);
+test("方格一格 5 呎：小 1 格、中 2 格、大 3 格", () => {
+  assert.equal(core.pixelSize(SQUARE, "small", "square"), 100);
+  assert.equal(core.pixelSize(SQUARE, "medium", "square"), 200);
+  assert.equal(core.pixelSize(SQUARE, "large", "square"), 300);
+  assert.equal(core.pixelSize(SQUARE, "medium", "hex"), 200, "六角形 token 在方格上一樣大");
+});
+
+test("方格一格 10 呎：小 0.5 格、中 1 格、大 1.5 格", () => {
+  assert.equal(core.pixelSize(TEN_FOOT, "small", "square"), 50);
+  assert.equal(core.pixelSize(TEN_FOOT, "medium", "square"), 100);
+  assert.equal(core.pixelSize(TEN_FOOT, "large", "square"), 150);
+});
+
+test("六角格：六角形 token 是 1、2、3 倍邊長，方形 token 不超過上下邊", () => {
+  assert.equal(core.pixelSize(HEX, "small", "hex"), 100);
+  assert.equal(core.pixelSize(HEX, "medium", "hex"), 200);
+  assert.equal(core.pixelSize(HEX, "large", "hex"), 300);
+  near(core.pixelSize(HEX, "small", "square"), HEX_HEIGHT);
+  near(core.pixelSize(HEX, "medium", "square"), HEX_HEIGHT * 2);
+  near(core.pixelSize(HEX, "large", "square"), HEX_HEIGHT * 3);
+});
+
+test("六角格不支援一格 10 呎：就算設定留著也不換算", () => {
+  const grid = { ...HEX, tenFoot: true };
+  for (const footprint of ["small", "medium", "large"]) {
+    assert.equal(core.pixelSize(grid, footprint, "hex"), core.pixelSize(HEX, footprint, "hex"));
+    assert.deepEqual(core.snapPoint(grid, { x: 310, y: 400, footprint }), core.snapPoint(HEX, { x: 310, y: 400, footprint }));
   }
 });
 
-test("六角格：六角形 token 貼齊左右頂點，方形 token 不超過上下邊", () => {
-  assert.equal(core.pixelSize(HEX, "medium", "hex"), 100);
-  assert.equal(core.pixelSize(HEX, "large", "hex"), 200);
-  near(core.pixelSize(HEX, "medium", "square"), HEX_HEIGHT);
-  near(core.pixelSize(HEX, "small", "square"), HEX_HEIGHT / 2);
-  near(core.pixelSize(HEX, "large", "square"), HEX_HEIGHT * 2);
-});
-
-test("方格：小與中對齊格子中心，大對齊格線交點", () => {
+test("方格一格 5 呎：小與大對齊格子中心，中對齊格線交點", () => {
   const grid = { ...SQUARE, offsetX: 10, offsetY: 20 };
   assert.deepEqual(core.snapPoint(grid, { x: 130, y: 140, footprint: "small" }), { x: 160, y: 170 });
-  assert.deepEqual(core.snapPoint(grid, { x: 130, y: 140, footprint: "medium" }), { x: 160, y: 170 });
-  assert.deepEqual(core.snapPoint(grid, { x: 130, y: 140, footprint: "large" }), { x: 110, y: 120 });
+  assert.deepEqual(core.snapPoint(grid, { x: 130, y: 140, footprint: "large" }), { x: 160, y: 170 });
+  assert.deepEqual(core.snapPoint(grid, { x: 130, y: 140, footprint: "medium" }), { x: 110, y: 120 });
+});
+
+test("方格一格 10 呎：以 5 呎小格對齊", () => {
+  const point = { x: 130, y: 140 };
+  assert.deepEqual(core.snapPoint(TEN_FOOT, { ...point, footprint: "small" }), { x: 125, y: 125 });
+  assert.deepEqual(core.snapPoint(TEN_FOOT, { ...point, footprint: "large" }), { x: 125, y: 125 });
+  assert.deepEqual(core.snapPoint(TEN_FOOT, { ...point, footprint: "medium" }), { x: 150, y: 150 });
 });
 
 test("placement 回傳畫的位置與大小，不改動 token 本身", () => {
-  const token = Object.freeze({ x: 130, y: 140, size: 333, shape: "square", footprint: "large" });
+  const token = Object.freeze({ x: 130, y: 140, size: 333, shape: "square", footprint: "medium" });
   assert.deepEqual(core.placement(SQUARE, token, BOUNDS), { x: 100, y: 100, size: 200 });
   assert.equal(token.size, 333);
 });
 
-test("六角格：對齊格子中心；大對齊三格交會的頂點", () => {
-  const model = createGridModel(HEX);
-  const medium = core.snapPoint(HEX, { x: 310, y: 400, footprint: "medium" });
-  nearPoint(medium, model.center(model.cellAt(310, 400)));
-
-  const large = core.snapPoint(HEX, { x: 310, y: 400, footprint: "large" });
-  const touching = new Set();
-  for (const [dx, dy] of [[12, 0], [-12, 0], [0, 12], [0, -12], [8, 8], [-8, -8], [8, -8], [-8, 8]]) {
-    const cell = model.cellAt(large.x + dx, large.y + dy);
-    touching.add(`${cell.col},${cell.row}`);
+// 三格、七格對應的格子，以中心格（或頂點旁的格子）列出。
+function cellsCovered(model, grid, footprint, placed) {
+  const center = model.cellAt(placed.x, placed.y);
+  if (footprint === "small") return [center];
+  if (footprint === "large") {
+    const all = [];
+    model.forEachCellInBox({ minX: placed.x - 200, minY: placed.y - 200, maxX: placed.x + 200, maxY: placed.y + 200 }, (cell) => {
+      if (model.distance(cell, center) <= 1) all.push(cell);
+    });
+    return all;
   }
-  assert.equal(touching.size, 3, "頂點周圍應該剛好三格");
+  const seen = new Map();
+  for (let angle = 0; angle < 360; angle += 15) {
+    const radians = (angle * Math.PI) / 180;
+    const cell = model.cellAt(placed.x + Math.cos(radians) * 12, placed.y + Math.sin(radians) * 12);
+    seen.set(JSON.stringify(cell), cell);
+  }
+  return [...seen.values()];
+}
+
+test("六角格：小與大對齊格子中心，中對齊三格交會的頂點，token 剛好包住 1／3／7 格", () => {
+  const model = createGridModel(HEX);
+  const expectedCells = { small: 1, medium: 3, large: 7 };
+  for (const footprint of ["small", "medium", "large"]) {
+    const placed = core.placement(HEX, { x: 2010, y: 1730, shape: "hex", footprint }, BOUNDS);
+    if (footprint !== "medium") nearPoint(placed, model.center(model.cellAt(placed.x, placed.y)));
+    else nearPoint(model.snapToIntersection(placed.x, placed.y), placed);
+    const cells = cellsCovered(model, HEX, footprint, placed);
+    assert.equal(cells.length, expectedCells[footprint], footprint);
+    // 平頂六角形：|x|·√3 + |y| 不超過 √3 倍外接半徑，等於的點就是貼在邊上。
+    const radius = placed.size / 2;
+    let widest = 0;
+    for (const cell of cells) {
+      for (const corner of model.polygon(cell)) {
+        const dx = Math.abs(corner.x - placed.x);
+        const dy = Math.abs(corner.y - placed.y);
+        assert.ok(dy <= (Math.sqrt(3) / 2) * radius + 1e-6, footprint + " 上下超出");
+        widest = Math.max(widest, (dx * Math.sqrt(3) + dy) / (Math.sqrt(3) * radius));
+      }
+    }
+    near(widest, 1, footprint + " 應該剛好貼齊外框");
+  }
 });
 
 test("對齊是冪等的：已對齊的位置不再移動，四捨五入後也一樣", () => {
-  for (const grid of [SQUARE, HEX]) {
+  for (const grid of [SQUARE, TEN_FOOT, HEX]) {
     for (const footprint of ["small", "medium", "large"]) {
       for (const [x, y] of [[313, 477], [1200, 90], [755.5, 1234.2]]) {
         const once = core.snapPoint(grid, { x, y, footprint }, BOUNDS);
@@ -97,28 +149,29 @@ test("格線位移讓最近的格子落在地圖外時，改用地圖內的格�
   const grid = { ...SQUARE, offsetX: 30, offsetY: 30 };
   const bounds = { width: 500, height: 500 };
   // 最近的格子中心是 (-20, -20)，地圖內最近的是 (80, 80)。
-  assert.deepEqual(core.snapPoint(grid, { x: 5, y: 5, footprint: "medium" }, bounds), { x: 80, y: 80 });
-  assert.deepEqual(core.snapPoint(grid, { x: 5, y: 5, footprint: "medium" }), { x: -20, y: -20 });
-  // 大的對齊交點：(30, 30) 本來就在地圖內。
-  assert.deepEqual(core.snapPoint(grid, { x: 5, y: 5, footprint: "large" }, bounds), { x: 30, y: 30 });
+  assert.deepEqual(core.snapPoint(grid, { x: 5, y: 5, footprint: "small" }, bounds), { x: 80, y: 80 });
+  assert.deepEqual(core.snapPoint(grid, { x: 5, y: 5, footprint: "small" }), { x: -20, y: -20 });
+  // 中對齊交點：(30, 30) 本來就在地圖內。
+  assert.deepEqual(core.snapPoint(grid, { x: 5, y: 5, footprint: "medium" }, bounds), { x: 30, y: 30 });
 });
 
-test("換尺寸：中→大→中回到同一格，來回不會飄走", () => {
-  for (const grid of [SQUARE, HEX]) {
-    const model = createGridModel(grid);
-    const start = { ...model.center({ col: 7, row: 9 }), shape: "square", footprint: "medium" };
+test("換尺寸：小→中→小回到同一格，來回不會飄走", () => {
+  for (const grid of [SQUARE, TEN_FOOT, HEX]) {
+    const model = grid === TEN_FOOT ? createGridModel({ ...SQUARE, size: 50 }) : createGridModel(grid);
+    const start = { ...model.center({ col: 7, row: 9 }), shape: "square", footprint: "small" };
     let current = start;
     for (let round = 0; round < 4; round += 1) {
-      const large = { ...current, ...core.retarget(grid, current, "large", BOUNDS), footprint: "large" };
-      current = { ...large, ...core.retarget(grid, large, "medium", BOUNDS), footprint: "medium" };
+      const medium = { ...current, ...core.retarget(grid, current, "medium", BOUNDS), footprint: "medium" };
+      nearPoint(core.snapPoint(grid, medium, BOUNDS), medium);
+      current = { ...medium, ...core.retarget(grid, medium, "small", BOUNDS), footprint: "small" };
       nearPoint(current, start);
     }
-    // 小與中的位置相同。
-    nearPoint(core.retarget(grid, start, "small", BOUNDS), start);
+    // 小與大的中心相同。
+    nearPoint(core.retarget(grid, start, "large", BOUNDS), start);
   }
 });
 
-test("方向鍵：方格移動一格，小、中、大都一樣", () => {
+test("方向鍵：方格移動一個畫出來的格子，小、中、大都一樣", () => {
   for (const footprint of ["small", "medium", "large"]) {
     const here = core.snapPoint(SQUARE, { x: 510, y: 520, footprint }, BOUNDS);
     const token = { ...here, footprint };
@@ -129,8 +182,17 @@ test("方向鍵：方格移動一格，小、中、大都一樣", () => {
   }
 });
 
+test("方向鍵：一格 10 呎的地圖也走一個畫出來的格子，移動後仍對齊 5 呎格", () => {
+  for (const footprint of ["small", "medium", "large"]) {
+    const here = core.snapPoint(TEN_FOOT, { x: 510, y: 520, footprint }, BOUNDS);
+    const next = core.step(TEN_FOOT, { ...here, footprint }, "ArrowRight", 0, BOUNDS);
+    assert.deepEqual(next, { x: here.x + 100, y: here.y });
+    assert.deepEqual(core.snapPoint(TEN_FOOT, { ...next, footprint }, BOUNDS), next);
+  }
+});
+
 test("方向鍵：跟著畫面旋轉，按的方向就是螢幕上看到的方向", () => {
-  const token = { x: 550, y: 550, footprint: "medium" };
+  const token = { x: 550, y: 550, footprint: "small" };
   const moved = (key, rotation) => {
     const next = core.step(SQUARE, token, key, rotation, BOUNDS);
     return [next.x - token.x, next.y - token.y];
@@ -155,20 +217,20 @@ test("方向鍵的旋轉與畫面座標換算一致", () => {
     270: (x, y) => [-y, x]
   };
   const screens = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
-  const token = { x: 550, y: 550, footprint: "medium" };
+  const token = { x: 550, y: 550, footprint: "small" };
   for (const rotation of [0, 90, 180, 270]) {
     for (const [key, [sx, sy]] of Object.entries(screens)) {
       const next = core.step(SQUARE, token, key, rotation, BOUNDS);
       const [dx, dy] = screenToMap[rotation](sx, sy);
-      assert.equal(next.x - token.x, dx * 100 || 0, `${key}@${rotation}`);
-      assert.equal(next.y - token.y, dy * 100 || 0, `${key}@${rotation}`);
+      assert.equal(next.x - token.x, dx * 100 || 0, key + "@" + rotation);
+      assert.equal(next.y - token.y, dy * 100 || 0, key + "@" + rotation);
     }
   }
 });
 
 test("方向鍵：走出地圖時不移動", () => {
   const bounds = { width: 300, height: 300 };
-  const token = { x: 50, y: 50, footprint: "medium" };
+  const token = { x: 50, y: 50, footprint: "small" };
   assert.equal(core.step(SQUARE, token, "ArrowLeft", 0, bounds), null);
   assert.equal(core.step(SQUARE, token, "ArrowUp", 0, bounds), null);
   assert.deepEqual(core.step(SQUARE, token, "ArrowRight", 0, bounds), { x: 150, y: 50 });
@@ -177,18 +239,20 @@ test("方向鍵：走出地圖時不移動", () => {
 
 test("六角格方向鍵：上下同一欄，左右走到相鄰欄的最近列", () => {
   const model = createGridModel(HEX);
-  for (const start of [{ col: 10, row: 10 }, { col: 11, row: 10 }]) {
-    const token = { ...model.center(start), footprint: "medium" };
-    const cellAfter = (key) => {
-      const next = core.step(HEX, token, key, 0, BOUNDS);
-      return model.cellAt(next.x, next.y);
-    };
-    assert.deepEqual(cellAfter("ArrowUp"), { col: start.col, row: start.row - 1 });
-    assert.deepEqual(cellAfter("ArrowDown"), { col: start.col, row: start.row + 1 });
-    for (const key of ["ArrowLeft", "ArrowRight"]) {
-      const cell = cellAfter(key);
-      assert.equal(Math.abs(cell.col - start.col), 1, key);
-      assert.equal(model.distance(cell, start), 1, `${key} 應該走到相鄰的格子`);
+  for (const footprint of ["small", "large"]) {
+    for (const start of [{ col: 10, row: 10 }, { col: 11, row: 10 }]) {
+      const token = { ...model.center(start), footprint };
+      const cellAfter = (key) => {
+        const next = core.step(HEX, token, key, 0, BOUNDS);
+        return model.cellAt(next.x, next.y);
+      };
+      assert.deepEqual(cellAfter("ArrowUp"), { col: start.col, row: start.row - 1 });
+      assert.deepEqual(cellAfter("ArrowDown"), { col: start.col, row: start.row + 1 });
+      for (const key of ["ArrowLeft", "ArrowRight"]) {
+        const cell = cellAfter(key);
+        assert.equal(Math.abs(cell.col - start.col), 1, key);
+        assert.equal(model.distance(cell, start), 1, key + " 應該走到相鄰的格子");
+      }
     }
   }
 });
@@ -196,7 +260,7 @@ test("六角格方向鍵：上下同一欄，左右走到相鄰欄的最近列",
 test("六角格方向鍵：連按左右高度維持水平，不會一路往上或往下", () => {
   const model = createGridModel(HEX);
   const start = model.center({ col: 10, row: 10 });
-  let token = { ...start, footprint: "medium" };
+  let token = { ...start, footprint: "small" };
   const heights = [];
   for (let press = 0; press < 8; press += 1) {
     token = { ...token, ...core.step(HEX, token, "ArrowRight", 0, BOUNDS) };
@@ -207,14 +271,14 @@ test("六角格方向鍵：連按左右高度維持水平，不會一路往上�
   near(token.x - start.x, 8 * 75, "x");
 });
 
-test("六角格的大：沿格子移動後仍在交點上，上下左右都走得回來", () => {
+test("六角格的中（三格）：沿格子移動後仍在交點上，上下左右都走得回來", () => {
   const model = createGridModel(HEX);
-  const here = core.snapPoint(HEX, { x: 2010, y: 1730, footprint: "large" }, BOUNDS);
-  const token = { ...here, footprint: "large" };
+  const here = core.snapPoint(HEX, { x: 2010, y: 1730, footprint: "medium" }, BOUNDS);
+  const token = { ...here, footprint: "medium" };
   for (const [go, back] of [["ArrowUp", "ArrowDown"], ["ArrowLeft", "ArrowRight"], ["ArrowRight", "ArrowLeft"]]) {
     const next = { ...token, ...core.step(HEX, token, go, 0, BOUNDS) };
     nearPoint(model.snapToIntersection(next.x, next.y), next);
-    assert.ok(Math.hypot(next.x - here.x, next.y - here.y) < HEX_HEIGHT + 1e-6, `${go} 應該只走一格`);
+    assert.ok(Math.hypot(next.x - here.x, next.y - here.y) < HEX_HEIGHT + 1e-6, go + " 應該只走一格");
     if (go === "ArrowUp") nearPoint(core.step(HEX, next, back, 0, BOUNDS), here);
   }
 });

@@ -173,7 +173,7 @@ function sanitizeTokenField(key, value) {
     case "visible": return Boolean(value);
     case "order": return finite(value) ?? 0;
     case "locked": return Boolean(value);
-    case "footprint": return TOKEN_FOOTPRINTS.has(value) ? value : "medium";
+    case "footprint": return TOKEN_FOOTPRINTS.has(value) ? value : "small";
     default: return undefined;
   }
 }
@@ -192,7 +192,7 @@ function sanitizeTokenChanges(changes) {
 // 新增 token：id 與圖片雜湊必填；玩家新增的 token 一律未鎖定，也不能帶名稱或先攻連結。
 function sanitizeNewToken(token, role) {
   if (!isPlainObject(token) || !isValidId(token.id) || !isValidHash(token.imageHash)) return null;
-  const defaults = { name: "", initiativeLabel: "", initiativeEntryId: "", hpFontSize: 24, x: 0, y: 0, size: 96, shape: "square", visible: true, order: 0, locked: false, footprint: "medium" };
+  const defaults = { name: "", initiativeLabel: "", initiativeEntryId: "", hpFontSize: 24, x: 0, y: 0, size: 96, shape: "square", visible: true, order: 0, locked: false, footprint: "small" };
   const fields = sanitizeTokenChanges(token);
   const result = { id: token.id, imageHash: token.imageHash, ...defaults, ...fields };
   if (role !== "gm") {

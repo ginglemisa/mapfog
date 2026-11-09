@@ -8,11 +8,12 @@
 })(typeof self !== "undefined" ? self : this, function (measureCore) {
   "use strict";
 
-  const { createGridModel } = measureCore;
+  const { createGridModel, createTemplateModel } = measureCore;
 
-  // 尺寸以畫出來的格子為單位，不受「一格 10 呎」影響。
-  const FOOTPRINT_SCALE = { small: 0.5, medium: 1, large: 2 };
-  const DEFAULT_FOOTPRINT = "medium";
+  // 尺寸是固定的實際大小：方格佔幾個 5 呎格（小 5×5、中 10×10、大 15×15 呎），一格 10 呎的地圖會畫成 0.5、1、1.5 格。
+  // 六角格固定每格 5 呎，小中大是 1、3、7 格（DMG 2014 的 Creature Size and Space 表）；剛好包住它們的六角形邊長也是 1、2、3 倍。
+  const FOOTPRINT_SPAN = { small: 1, medium: 2, large: 3 };
+  const DEFAULT_FOOTPRINT = "small";
   const ARROW_STEPS = {
     ArrowUp: { dx: 0, dy: -1 },
     ArrowDown: { dx: 0, dy: 1 },
@@ -37,7 +38,7 @@
   ].join(",");
 
   function normalizeFootprint(value) {
-    return Object.prototype.hasOwnProperty.call(FOOTPRINT_SCALE, value) ? value : DEFAULT_FOOTPRINT;
+    return Object.prototype.hasOwnProperty.call(FOOTPRINT_SPAN, value) ? value : DEFAULT_FOOTPRINT;
   }
 
   // 沒開格線時開關無效。
@@ -51,13 +52,13 @@
       && point.x <= bounds.width + BOUNDS_EPSILON && point.y <= bounds.height + BOUNDS_EPSILON;
   }
 
-  function isLarge(footprint) {
-    return normalizeFootprint(footprint) === "large";
+  // 方格的中佔偶數個 5 呎格，六角格的中佔三格，都以交點為中心；小與大以格子中心為中心。
+  function usesIntersection(footprint) {
+    return normalizeFootprint(footprint) === "medium";
   }
 
-  // 大的對齊格線交點，其餘對齊格子中心。
   function nearestAnchor(model, point, footprint, bounds) {
-    const primary = isLarge(footprint)
+    const primary = usesIntersection(footprint)
       ? model.snapToIntersection(point.x, point.y)
       : model.center(model.cellAt(point.x, point.y));
     if (isInside(primary, bounds)) return primary;
@@ -67,7 +68,7 @@
     let best = null;
     let bestDistance = Infinity;
     model.forEachCellInBox(box, (cell) => {
-      for (const anchor of isLarge(footprint) ? model.polygon(cell) : [model.center(cell)]) {
+      for (const anchor of usesIntersection(footprint) ? model.polygon(cell) : [model.center(cell)]) {
         const distance = Math.hypot(anchor.x - point.x, anchor.y - point.y);
         if (isInside(anchor, bounds) && distance < bestDistance - BOUNDS_EPSILON) {
           best = anchor;
@@ -78,14 +79,14 @@
     return best || primary;
   }
 
-  // 六角格的「一格」：六角形 token 取左右頂點距離，剛好貼齊格子；方形 token 取上下邊距離，才不會蓋到上下鄰格。
+  // 六角形 token 取左右頂點距離，剛好包住佔的格子；方形 token 取上下邊距離，才不會蓋到上下鄰格。
   function pixelSize(grid, footprint, shape) {
-    const base = grid.type === "hex" && shape !== "hex" ? createGridModel(grid).pitch : grid.size;
-    return base * FOOTPRINT_SCALE[normalizeFootprint(footprint)];
+    const base = grid.type === "hex" && shape === "hex" ? grid.size : createTemplateModel(grid).pitch;
+    return base * FOOTPRINT_SPAN[normalizeFootprint(footprint)];
   }
 
   function snapPoint(grid, token, bounds) {
-    const anchor = nearestAnchor(createGridModel(grid), token, token.footprint, bounds);
+    const anchor = nearestAnchor(createTemplateModel(grid), token, token.footprint, bounds);
     return { x: anchor.x, y: anchor.y };
   }
 
@@ -96,12 +97,12 @@
 
   // 換尺寸後的位置：中心與交點互換時固定往左上／右下找，來回切換才不會一路飄走。
   function retarget(grid, token, nextFootprint, bounds) {
-    const model = createGridModel(grid);
+    const model = createTemplateModel(grid);
     const here = nearestAnchor(model, token, token.footprint, bounds);
     const nudge = model.pitch * NUDGE_RATIO;
     let probe = here;
-    if (isLarge(nextFootprint) && !isLarge(token.footprint)) probe = { x: here.x - nudge, y: here.y - nudge };
-    if (!isLarge(nextFootprint) && isLarge(token.footprint)) probe = { x: here.x + nudge, y: here.y + nudge };
+    if (usesIntersection(nextFootprint) && !usesIntersection(token.footprint)) probe = { x: here.x - nudge, y: here.y - nudge };
+    if (!usesIntersection(nextFootprint) && usesIntersection(token.footprint)) probe = { x: here.x + nudge, y: here.y + nudge };
     const anchor = nearestAnchor(model, probe, nextFootprint, bounds);
     return { x: anchor.x, y: anchor.y };
   }
@@ -114,15 +115,15 @@
     return { dx, dy };
   }
 
-  // 按一次方向鍵的目的地；走出地圖回傳 null。
+  // 按一次方向鍵的目的地：走一個畫出來的格子，對齊方式不變；走出地圖回傳 null。
   // 六角格的相鄰欄有上下兩格一樣近，固定選列號相同的那格：連按左右會上下交錯、整體維持水平。
   function step(grid, token, key, rotation, bounds) {
     const screen = ARROW_STEPS[key];
     if (!screen) return null;
     const { dx, dy } = toMapDirection(screen, rotation);
     const model = createGridModel(grid);
-    const here = nearestAnchor(model, token, token.footprint, bounds);
-    const nudge = isLarge(token.footprint) ? model.pitch * NUDGE_RATIO : 0;
+    const here = nearestAnchor(createTemplateModel(grid), token, token.footprint, bounds);
+    const nudge = usesIntersection(token.footprint) ? model.pitch * NUDGE_RATIO : 0;
     const cell = model.cellAt(here.x + nudge, here.y + nudge);
     const from = model.center(cell);
     const to = model.center({ col: cell.col + dx, row: cell.row + dy });
