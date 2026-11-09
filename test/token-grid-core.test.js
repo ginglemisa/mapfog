@@ -38,31 +38,49 @@ test("尺寸名稱：不認得的值一律當成小", () => {
 });
 
 test("方格一格 5 呎：小 1 格、中 2 格、大 3 格", () => {
-  assert.equal(core.pixelSize(SQUARE, "small", "square"), 100);
-  assert.equal(core.pixelSize(SQUARE, "medium", "square"), 200);
-  assert.equal(core.pixelSize(SQUARE, "large", "square"), 300);
-  assert.equal(core.pixelSize(SQUARE, "medium", "hex"), 200, "六角形 token 在方格上一樣大");
+  assert.equal(core.pixelSize(SQUARE, "small"), 100);
+  assert.equal(core.pixelSize(SQUARE, "medium"), 200);
+  assert.equal(core.pixelSize(SQUARE, "large"), 300);
 });
 
 test("方格一格 10 呎：小 0.5 格、中 1 格、大 1.5 格", () => {
-  assert.equal(core.pixelSize(TEN_FOOT, "small", "square"), 50);
-  assert.equal(core.pixelSize(TEN_FOOT, "medium", "square"), 100);
-  assert.equal(core.pixelSize(TEN_FOOT, "large", "square"), 150);
+  assert.equal(core.pixelSize(TEN_FOOT, "small"), 50);
+  assert.equal(core.pixelSize(TEN_FOOT, "medium"), 100);
+  assert.equal(core.pixelSize(TEN_FOOT, "large"), 150);
 });
 
-test("六角格：六角形 token 是 1、2、3 倍邊長，方形 token 不超過上下邊", () => {
-  assert.equal(core.pixelSize(HEX, "small", "hex"), 100);
-  assert.equal(core.pixelSize(HEX, "medium", "hex"), 200);
-  assert.equal(core.pixelSize(HEX, "large", "hex"), 300);
-  near(core.pixelSize(HEX, "small", "square"), HEX_HEIGHT);
-  near(core.pixelSize(HEX, "medium", "square"), HEX_HEIGHT * 2);
-  near(core.pixelSize(HEX, "large", "square"), HEX_HEIGHT * 3);
+test("六角格：小中大是 1、2、3 倍邊長", () => {
+  assert.equal(core.pixelSize(HEX, "small"), 100);
+  assert.equal(core.pixelSize(HEX, "medium"), 200);
+  assert.equal(core.pixelSize(HEX, "large"), 300);
+});
+
+test("格子化的六角格上一律畫成六角形，token 存的形狀不變", () => {
+  for (const footprint of ["small", "medium", "large"]) {
+    for (const shape of ["square", "hex"]) {
+      const token = Object.freeze({ x: 2010, y: 1730, shape, footprint });
+      const placed = core.placement(HEX, token, BOUNDS);
+      assert.equal(placed.shape, "hex", shape + " " + footprint);
+      assert.equal(placed.size, core.pixelSize(HEX, footprint));
+      assert.equal(token.shape, shape);
+    }
+  }
+});
+
+test("其他情況維持 token 自己的形狀", () => {
+  assert.equal(core.placement(SQUARE, { x: 130, y: 140, shape: "square" }).shape, "square");
+  assert.equal(core.placement(SQUARE, { x: 130, y: 140, shape: "hex" }).shape, "hex");
+  assert.equal(core.displayShape({ ...HEX, tokenSnap: false }, { shape: "square" }), "square");
+  assert.equal(core.displayShape({ ...HEX, enabled: false }, { shape: "square" }), "square");
+  assert.equal(core.shapeFollowsGrid(HEX), true);
+  assert.equal(core.shapeFollowsGrid(SQUARE), false);
+  assert.equal(core.shapeFollowsGrid({ ...HEX, tokenSnap: false }), false);
 });
 
 test("六角格不支援一格 10 呎：就算設定留著也不換算", () => {
   const grid = { ...HEX, tenFoot: true };
   for (const footprint of ["small", "medium", "large"]) {
-    assert.equal(core.pixelSize(grid, footprint, "hex"), core.pixelSize(HEX, footprint, "hex"));
+    assert.equal(core.pixelSize(grid, footprint), core.pixelSize(HEX, footprint));
     assert.deepEqual(core.snapPoint(grid, { x: 310, y: 400, footprint }), core.snapPoint(HEX, { x: 310, y: 400, footprint }));
   }
 });
@@ -83,7 +101,7 @@ test("方格一格 10 呎：以 5 呎小格對齊", () => {
 
 test("placement 回傳畫的位置與大小，不改動 token 本身", () => {
   const token = Object.freeze({ x: 130, y: 140, size: 333, shape: "square", footprint: "medium" });
-  assert.deepEqual(core.placement(SQUARE, token, BOUNDS), { x: 100, y: 100, size: 200 });
+  assert.deepEqual(core.placement(SQUARE, token, BOUNDS), { x: 100, y: 100, size: 200, shape: "square" });
   assert.equal(token.size, 333);
 });
 

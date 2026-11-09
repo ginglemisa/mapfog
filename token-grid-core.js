@@ -79,9 +79,18 @@
     return best || primary;
   }
 
-  // 六角形 token 取左右頂點距離，剛好包住佔的格子；方形 token 取上下邊距離，才不會蓋到上下鄰格。
-  function pixelSize(grid, footprint, shape) {
-    const base = grid.type === "hex" && shape === "hex" ? grid.size : createTemplateModel(grid).pitch;
+  // 格子化的六角格上，token 一律畫成六角形，形狀由格子決定。
+  function shapeFollowsGrid(grid) {
+    return isActive(grid) && grid.type === "hex";
+  }
+
+  function displayShape(grid, token) {
+    return shapeFollowsGrid(grid) ? "hex" : token.shape;
+  }
+
+  // 六角格以左右頂點距離為一格，六角形才會剛好包住佔的格子；方格以 5 呎小格為一格。
+  function pixelSize(grid, footprint) {
+    const base = grid.type === "hex" ? grid.size : createTemplateModel(grid).pitch;
     return base * FOOTPRINT_SPAN[normalizeFootprint(footprint)];
   }
 
@@ -90,9 +99,9 @@
     return { x: anchor.x, y: anchor.y };
   }
 
-  // 格子化時實際畫出來的位置與大小；token 自己存的 x、y、size 不動，關閉格子化就回到原本的樣子。
+  // 格子化時實際畫出來的位置、大小與形狀；token 自己存的 x、y、size、shape 不動，關閉格子化就回到原本的樣子。
   function placement(grid, token, bounds) {
-    return { ...snapPoint(grid, token, bounds), size: pixelSize(grid, token.footprint, token.shape) };
+    return { ...snapPoint(grid, token, bounds), size: pixelSize(grid, token.footprint), shape: displayShape(grid, token) };
   }
 
   // 換尺寸後的位置：中心與交點互換時固定往左上／右下找，來回切換才不會一路飄走。
@@ -147,6 +156,8 @@
     DEFAULT_FOOTPRINT,
     normalizeFootprint,
     isActive,
+    shapeFollowsGrid,
+    displayShape,
     pixelSize,
     snapPoint,
     placement,

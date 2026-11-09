@@ -703,11 +703,17 @@ function updateTokenControls() {
   const shownSize = Math.round(selected ? getTokenPlacement(selected).size : TOKEN_DEFAULT_SIZE);
   if (tokenSize) { tokenSize.disabled = !editable || snapActive; tokenSize.value = shownSize; }
   if (tokenSizeValue) tokenSizeValue.textContent = `${shownSize}px`;
-  if (tokenSnapStatus) tokenSnapStatus.textContent = snapActive ? "開啟" : (gridSettings.tokenSnap ? "等待格線開啟" : "關閉");
-  tokenSquareBtn?.classList.toggle("active", selected?.shape === "square");
-  tokenHexBtn?.classList.toggle("active", selected?.shape === "hex");
-  if (tokenSquareBtn) tokenSquareBtn.disabled = !editable;
-  if (tokenHexBtn) tokenHexBtn.disabled = !editable;
+  if (tokenSnapStatus) tokenSnapStatus.textContent = snapActive ? (TokenGrid.shapeFollowsGrid(gridSettings) ? "開啟（形狀由六角格決定）" : "開啟") : (gridSettings.tokenSnap ? "等待格線開啟" : "關閉");
+  // 格子化的六角格上形狀由格子決定：按鈕顯示實際畫出來的形狀並停用。
+  const shapeFollowsGrid = TokenGrid.shapeFollowsGrid(gridSettings);
+  const shownShape = selected ? TokenGrid.displayShape(gridSettings, selected) : null;
+  tokenSquareBtn?.classList.toggle("active", shownShape === "square");
+  tokenHexBtn?.classList.toggle("active", shownShape === "hex");
+  for (const button of [tokenSquareBtn, tokenHexBtn]) {
+    if (!button) continue;
+    button.disabled = !editable || shapeFollowsGrid;
+    button.title = shapeFollowsGrid ? "六角格上形狀由格子決定" : "";
+  }
   if (tokenClearBtn) tokenClearBtn.disabled = !editable;
   tokenSettingsBtn?.classList.toggle("active", !tokenPanel?.hidden || tokenCollectionState.tokens.length > 0);
   if (tokenStatus) {
@@ -765,9 +771,9 @@ function renderTokens() {
     element.style.width = `${placed.size}px`; element.style.height = `${placed.size}px`;
     element.style.transform = `translate(${placed.x - placed.size / 2}px, ${placed.y - placed.size / 2}px) rotate(var(--token-rotation, 0deg))`;
     element.title = token.name;
-    element.classList.toggle("square", token.shape === "square"); element.classList.toggle("hex", token.shape === "hex");
+    element.classList.toggle("square", placed.shape === "square"); element.classList.toggle("hex", placed.shape === "hex");
     element.classList.toggle("selected", token.id === tokenCollectionState.selectedTokenId);
-    element.classList.toggle("fit-hex-cell", snapActive && gridSettings.type === "hex" && token.shape === "hex");
+    element.classList.toggle("fit-hex-cell", TokenGrid.shapeFollowsGrid(gridSettings));
     element.classList.toggle("snap-selected", snapActive && token.id === tokenCollectionState.selectedTokenId && !token.locked);
     element.classList.toggle("locked", token.locked);
   }

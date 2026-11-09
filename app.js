@@ -1064,17 +1064,23 @@ function updateTokenControls() {
     tokenSnapToggle.disabled = !gridSettings.enabled;
   }
   if (tokenSnapHint) {
-    tokenSnapHint.textContent = !gridSettings.enabled ? "需要先開啟格線" : (snapActive ? "選取後可用方向鍵移動一格" : "");
+    tokenSnapHint.textContent = !gridSettings.enabled ? "需要先開啟格線" : (snapActive ? `選取後可用方向鍵移動一格${TokenGrid.shapeFollowsGrid(gridSettings) ? "；形狀由六角格決定" : ""}` : "");
     tokenSnapHint.hidden = !tokenSnapHint.textContent;
   }
   const hpFontSize = document.getElementById("tokenHpFontSize");
   if (hpFontSize) { hpFontSize.disabled = !selected; hpFontSize.value = selected?.hpFontSize ?? 24; }
   const hpFontSizeValue = document.getElementById("tokenHpFontSizeValue");
   if (hpFontSizeValue) hpFontSizeValue.textContent = `${selected?.hpFontSize ?? 24}px`;
-  tokenSquareBtn?.classList.toggle("active", selected?.shape === "square");
-  tokenHexBtn?.classList.toggle("active", selected?.shape === "hex");
-  if (tokenSquareBtn) tokenSquareBtn.disabled = !selected;
-  if (tokenHexBtn) tokenHexBtn.disabled = !selected;
+  // 格子化的六角格上形狀由格子決定：按鈕顯示實際畫出來的形狀並停用。
+  const shapeFollowsGrid = TokenGrid.shapeFollowsGrid(gridSettings);
+  const shownShape = selected ? TokenGrid.displayShape(gridSettings, selected) : null;
+  tokenSquareBtn?.classList.toggle("active", shownShape === "square");
+  tokenHexBtn?.classList.toggle("active", shownShape === "hex");
+  for (const button of [tokenSquareBtn, tokenHexBtn]) {
+    if (!button) continue;
+    button.disabled = !selected || shapeFollowsGrid;
+    button.title = shapeFollowsGrid ? "六角格上形狀由格子決定" : "";
+  }
   if (tokenClearBtn) tokenClearBtn.disabled = !selected;
   tokenSettingsBtn?.classList.toggle("active", !tokenPanel?.hidden || tokenCollectionState.tokens.length > 0);
   if (tokenStatus) tokenStatus.textContent = selected ? `共 ${tokenCollectionState.tokens.length} 個 token；拖曳可同步位置` : "尚未上傳 token";
@@ -1120,9 +1126,9 @@ function renderTokens() {
     element.style.width = `${placed.size}px`; element.style.height = `${placed.size}px`;
     element.style.transform = `translate(${placed.x - placed.size / 2}px, ${placed.y - placed.size / 2}px) rotate(var(--token-rotation, 0deg))`;
     element.title = token.name;
-    element.classList.toggle("square", token.shape === "square"); element.classList.toggle("hex", token.shape === "hex");
+    element.classList.toggle("square", placed.shape === "square"); element.classList.toggle("hex", placed.shape === "hex");
     element.classList.toggle("selected", token.id === tokenCollectionState.selectedTokenId);
-    element.classList.toggle("fit-hex-cell", snapActive && gridSettings.type === "hex" && token.shape === "hex");
+    element.classList.toggle("fit-hex-cell", TokenGrid.shapeFollowsGrid(gridSettings));
     element.classList.toggle("snap-selected", snapActive && token.id === tokenCollectionState.selectedTokenId);
   }
   tokenLayer.querySelectorAll(".map-token").forEach((el) => { if (!visibleIds.has(el.dataset.tokenId)) el.remove(); });
