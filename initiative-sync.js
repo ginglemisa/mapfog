@@ -1271,11 +1271,12 @@
       }
       anchor.classList.toggle("enemy", entry.side === "enemy");
       anchor.classList.toggle("selected", token.id === tokenState.selectedTokenId);
-      anchor.style.transform = `translate(${token.x}px, ${token.y}px) rotate(var(--token-rotation, 0deg))`;
+      const placed = window.MapFogTokens.getPlacement(token);
+      anchor.style.transform = `translate(${placed.x}px, ${placed.y}px) rotate(var(--token-rotation, 0deg))`;
       const label = anchor.firstElementChild;
       label.textContent = String(getHpNumber(entry.hp));
       label.style.fontSize = `${token.hpFontSize || 24}px`;
-      label.style.bottom = `${token.size / 2 + 4}px`;
+      label.style.bottom = `${placed.size / 2 + 4}px`;
       label.setAttribute("aria-label", `${entry.name} HP ${getHpNumber(entry.hp)}`);
     }
     tokenLayer.querySelectorAll(".token-hp-anchor").forEach((anchor) => {

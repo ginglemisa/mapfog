@@ -13,11 +13,12 @@ const MAP_SIDE_LIMIT = 20000;
 const MAX_STROKES_PER_BATCH = 5000;
 const MAX_INITIATIVE_ENTRIES = 300;
 const MAX_MEASURE_LINE_CELLS = 2000;
+const TOKEN_FOOTPRINTS = new Set(["small", "medium", "large"]);
 
 // 圖片雜湊以外可以修改的 token 欄位，跟 app.js／player.js 的 TOKEN_SYNC_KEYS 一致。
-const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order", "locked"];
-// 玩家只能改未鎖定 token 的位置、大小與形狀。
-const PLAYER_EDITABLE_TOKEN_KEYS = ["x", "y", "size", "shape"];
+const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order", "locked", "footprint"];
+// 玩家只能改未鎖定 token 的位置、大小、形狀與格子尺寸。
+const PLAYER_EDITABLE_TOKEN_KEYS = ["x", "y", "size", "shape", "footprint"];
 // 地圖上的範圍（錐形、球形、發散、方形）。
 const MEASURE_SHAPES = new Set(["cone", "circle", "emanation", "square"]);
 const MEASURE_TEMPLATE_KEYS = ["x", "y", "size", "angle", "order"];
@@ -135,7 +136,8 @@ function sanitizeGridSettings(settings) {
     offsetX: clamp(finite(settings.offsetX) ?? 0, -240, 240),
     offsetY: clamp(finite(settings.offsetY) ?? 0, -240, 240),
     tenFoot: Boolean(settings.tenFoot),
-    diagonalHouseRule: Boolean(settings.diagonalHouseRule)
+    diagonalHouseRule: Boolean(settings.diagonalHouseRule),
+    tokenSnap: Boolean(settings.tokenSnap)
   };
 }
 
@@ -171,6 +173,7 @@ function sanitizeTokenField(key, value) {
     case "visible": return Boolean(value);
     case "order": return finite(value) ?? 0;
     case "locked": return Boolean(value);
+    case "footprint": return TOKEN_FOOTPRINTS.has(value) ? value : "small";
     default: return undefined;
   }
 }
@@ -189,7 +192,7 @@ function sanitizeTokenChanges(changes) {
 // 新增 token：id 與圖片雜湊必填；玩家新增的 token 一律未鎖定，也不能帶名稱或先攻連結。
 function sanitizeNewToken(token, role) {
   if (!isPlainObject(token) || !isValidId(token.id) || !isValidHash(token.imageHash)) return null;
-  const defaults = { name: "", initiativeLabel: "", initiativeEntryId: "", hpFontSize: 24, x: 0, y: 0, size: 96, shape: "square", visible: true, order: 0, locked: false };
+  const defaults = { name: "", initiativeLabel: "", initiativeEntryId: "", hpFontSize: 24, x: 0, y: 0, size: 96, shape: "square", visible: true, order: 0, locked: false, footprint: "small" };
   const fields = sanitizeTokenChanges(token);
   const result = { id: token.id, imageHash: token.imageHash, ...defaults, ...fields };
   if (role !== "gm") {
