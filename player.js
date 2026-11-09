@@ -23,6 +23,9 @@ const tokenClearBtn = document.getElementById("tokenClearBtn");
 const tokenStatus = document.getElementById("tokenStatus");
 const tokenSelect = document.getElementById("tokenSelect");
 const tokenLayer = document.getElementById("tokenLayer");
+const tokenSnapStatus = document.getElementById("tokenSnapStatus");
+const tokenFootprintButtons = document.querySelectorAll("[data-token-footprint]");
+const TokenGrid = window.MapFogTokenGrid;
 const mapCtx = mapCanvas.getContext("2d");
 const gridCtx = gridCanvas.getContext("2d");
 const fogCtx = fogCanvas.getContext("2d");
@@ -40,8 +43,8 @@ const LOCAL_TOKEN_PROTECTION_MS = 2000;
 const TOKEN_SOURCE_ROLE = "player";
 const LOCAL_IMAGE_PRUNE_DELAY_MS = 5000;
 // 圖片與 id 只在新增時送出，其餘欄位可以單獨更新。
-const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order", "locked"];
-const TOKEN_GEOMETRY_KEYS = ["x", "y", "size", "shape"];
+const TOKEN_SYNC_KEYS = ["name", "initiativeLabel", "initiativeEntryId", "hpFontSize", "x", "y", "size", "shape", "visible", "order", "locked", "footprint"];
+const TOKEN_GEOMETRY_KEYS = ["x", "y", "size", "shape", "footprint"];
 // 網址同時帶多種房間參數時，sync-mode.js 已顯示衝突說明；這裡直接停止，不啟動任何同步通道。
 if (window.MapFogSyncMode?.blocked) throw new Error("[MapFog] 網址同時包含多種同步模式參數，玩家畫面已停止。");
 const queryParams = new URLSearchParams(window.location.search);
@@ -104,6 +107,8 @@ let tokenCollectionState = createDefaultTokenCollectionState();
 let draggingTokenId = null;
 let tokenDragOffsetX = 0;
 let tokenDragOffsetY = 0;
+// 按下 token 之後真的移動過才算拖曳；只是點選不會改動它的位置。
+let tokenDragMoved = false;
 let firebaseSync = null;
 let tokenDragSyncTimer = null;
 let tokenControlSyncTimer = null;
@@ -277,6 +282,7 @@ function createDefaultGridSettings() {
     size: 80,
     lineWidth: 1,
     tenFoot: false,
+    tokenSnap: false,
     diagonalHouseRule: false,
     offsetX: 0,
     offsetY: 0
@@ -295,6 +301,7 @@ function normalizeGridSettings(settings = {}) {
     offsetX: clamp(Number(settings.offsetX ?? defaults.offsetX), -240, 240),
     offsetY: clamp(Number(settings.offsetY ?? defaults.offsetY), -240, 240),
     tenFoot: Boolean(settings.tenFoot),
+    tokenSnap: Boolean(settings.tokenSnap),
     diagonalHouseRule: Boolean(settings.diagonalHouseRule)
   };
 }
@@ -402,6 +409,7 @@ function drawGrid() {
 function setGridSettings(nextSettings, options = {}) {
   gridSettings = normalizeGridSettings({ ...gridSettings, ...nextSettings });
   drawGrid();
+  renderTokens();
   if (options.cache !== false) cacheGridSettings();
   window.dispatchEvent(new Event("mapfog:view-change"));
 }
@@ -437,7 +445,8 @@ function normalizeTokenState(state = {}) {
     visible: Boolean(state.visible && imageHash),
     // 建立時間，用來決定 token 清單與疊放順序；各自存在 token 上，同時新增也不會互相蓋掉。
     order: Number.isFinite(Number(state.order)) ? Number(state.order) : 0,
-    locked: Boolean(state.locked)
+    locked: Boolean(state.locked),
+    footprint: TokenGrid.normalizeFootprint(state.footprint)
   };
 }
 
@@ -617,6 +626,55 @@ function clampTokenPosition(x, y) {
   return { x: clamp(x, 0, mapCanvas.width), y: clamp(y, 0, mapCanvas.height) };
 }
 
+function getTokenMapBounds() {
+  return hasMap && mapCanvas.width && mapCanvas.height ? { width: mapCanvas.width, height: mapCanvas.height } : null;
+}
+
+// 格子化時 token 畫在格子上；拖曳中的那顆跟著指標走，放開才對齊。
+function getTokenPlacement(token) {
+  if (!TokenGrid.isActive(gridSettings)) return token;
+  const placed = TokenGrid.placement(gridSettings, token, getTokenMapBounds());
+  return draggingTokenId === token.id && tokenDragMoved ? { ...placed, x: token.x, y: token.y } : placed;
+}
+
+function setLocalTokenPosition(tokenId, position, options) {
+  const tokens = tokenCollectionState.tokens.map((token) => token.id === tokenId
+    ? { ...token, x: roundCanvasValue(position.x), y: roundCanvasValue(position.y) }
+    : token);
+  setTokenCollectionState({ tokens, selectedTokenId: tokenCollectionState.selectedTokenId }, options);
+}
+
+function snapDroppedToken(tokenId) {
+  const token = getTokenById(tokenId);
+  if (!token || !TokenGrid.isActive(gridSettings)) return;
+  setLocalTokenPosition(tokenId, TokenGrid.snapPoint(gridSettings, token, getTokenMapBounds()));
+}
+
+// 回到地圖操作時，鍵盤焦點不該還留在剛才調整的滑桿或下拉選單。
+function releaseTokenFormFocus() {
+  if (!TokenGrid.isActive(gridSettings)) return;
+  if (document.activeElement?.matches?.(TokenGrid.ARROW_BLOCKING_SELECTOR)) document.activeElement.blur();
+}
+
+function setSelectedTokenFootprint(footprint) {
+  const selected = getSelectedToken();
+  if (!selected || !TokenGrid.isActive(gridSettings)) return;
+  const position = TokenGrid.retarget(gridSettings, selected, footprint, getTokenMapBounds());
+  setTokenState({ footprint, x: roundCanvasValue(position.x), y: roundCanvasValue(position.y) });
+}
+
+function moveSelectedTokenByKey(event) {
+  if (draggingTokenId || !TokenGrid.isActive(gridSettings) || !TokenGrid.shouldHandleArrowKey(event, document)) return;
+  const token = getSelectedToken();
+  if (!hasMap || !token?.visible || token.locked) return;
+  event.preventDefault();
+  const next = TokenGrid.step(gridSettings, token, event.key, viewRotation, getTokenMapBounds());
+  if (!next) return;
+  setLocalTokenPosition(token.id, next);
+  protectLocalToken(token.id);
+  scheduleTokenDragSync(token.id);
+}
+
 function setTokenPanelOpen(open) {
   if (!tokenPanel || !tokenSettingsBtn) return;
   tokenPanel.hidden = !open;
@@ -637,8 +695,15 @@ function updateTokenControls() {
   }
   // 鎖定的 token 玩家完全不能操作。
   const editable = Boolean(selected && !selected.locked);
-  if (tokenSize) { tokenSize.disabled = !editable; tokenSize.value = Math.round(selected?.size ?? TOKEN_DEFAULT_SIZE); }
-  if (tokenSizeValue) tokenSizeValue.textContent = `${Math.round(selected?.size ?? TOKEN_DEFAULT_SIZE)}px`;
+  const snapActive = TokenGrid.isActive(gridSettings);
+  for (const button of tokenFootprintButtons) {
+    button.classList.toggle("active", Boolean(selected && snapActive && selected.footprint === button.dataset.tokenFootprint));
+    button.disabled = !(snapActive && editable);
+  }
+  const shownSize = Math.round(selected ? getTokenPlacement(selected).size : TOKEN_DEFAULT_SIZE);
+  if (tokenSize) { tokenSize.disabled = !editable || snapActive; tokenSize.value = shownSize; }
+  if (tokenSizeValue) tokenSizeValue.textContent = `${shownSize}px`;
+  if (tokenSnapStatus) tokenSnapStatus.textContent = snapActive ? "開啟" : (gridSettings.tokenSnap ? "等待格線開啟" : "關閉");
   tokenSquareBtn?.classList.toggle("active", selected?.shape === "square");
   tokenHexBtn?.classList.toggle("active", selected?.shape === "hex");
   if (tokenSquareBtn) tokenSquareBtn.disabled = !editable;
@@ -675,6 +740,7 @@ function getTokenImageUrl(token) {
 function renderTokens() {
   if (!tokenLayer) return;
   const visibleIds = new Set();
+  const snapActive = TokenGrid.isActive(gridSettings);
   const canShowLayer = Boolean(hasMap && tokenCollectionState.tokens.some((t) => t.visible && t.imageHash));
   tokenLayer.hidden = !canShowLayer;
   for (const token of tokenCollectionState.tokens) {
@@ -695,11 +761,14 @@ function renderTokens() {
     }
     const imageUrl = getTokenImageUrl(token);
     const image = element.querySelector("img"); if (image && imageUrl && image.src !== imageUrl) image.src = imageUrl;
-    element.style.width = `${token.size}px`; element.style.height = `${token.size}px`;
-    element.style.transform = `translate(${token.x - token.size / 2}px, ${token.y - token.size / 2}px) rotate(var(--token-rotation, 0deg))`;
+    const placed = getTokenPlacement(token);
+    element.style.width = `${placed.size}px`; element.style.height = `${placed.size}px`;
+    element.style.transform = `translate(${placed.x - placed.size / 2}px, ${placed.y - placed.size / 2}px) rotate(var(--token-rotation, 0deg))`;
     element.title = token.name;
     element.classList.toggle("square", token.shape === "square"); element.classList.toggle("hex", token.shape === "hex");
     element.classList.toggle("selected", token.id === tokenCollectionState.selectedTokenId);
+    element.classList.toggle("fit-hex-cell", snapActive && gridSettings.type === "hex" && token.shape === "hex");
+    element.classList.toggle("snap-selected", snapActive && token.id === tokenCollectionState.selectedTokenId && !token.locked);
     element.classList.toggle("locked", token.locked);
   }
   tokenLayer.querySelectorAll(".map-token").forEach((el) => { if (!visibleIds.has(el.dataset.tokenId)) el.remove(); });
@@ -790,12 +859,15 @@ function beginTokenDrag(event) {
   isPanning = false;
   viewport.classList.remove("panning");
 
+  releaseTokenFormFocus();
+  tokenDragMoved = false;
   draggingTokenId = token.id;
   protectLocalToken(token.id);
   tokenCollectionState.selectedTokenId = token.id;
   const point = eventToCanvasPoint(event);
-  tokenDragOffsetX = point.x - token.x;
-  tokenDragOffsetY = point.y - token.y;
+  const placed = getTokenPlacement(token);
+  tokenDragOffsetX = point.x - placed.x;
+  tokenDragOffsetY = point.y - placed.y;
 
   element.classList.add("dragging");
   try { element.setPointerCapture?.(event.pointerId); } catch { /* unsupported/ended pointer */ }
@@ -806,6 +878,7 @@ function moveTokenDrag(event) {
   if (!draggingTokenId) return;
   event.preventDefault();
   event.stopPropagation();
+  tokenDragMoved = true;
 
   const point = eventToCanvasPoint(event);
   const pos = clampTokenPosition(point.x - tokenDragOffsetX, point.y - tokenDragOffsetY);
@@ -832,6 +905,8 @@ function endTokenDrag(event) {
 
   draggingTokenId = null;
   protectLocalToken(tokenId);
+  if (tokenDragMoved) snapDroppedToken(tokenId);
+  tokenDragMoved = false;
   scheduleSceneCache();
   // 確保放開時再送出一次最終位置，即使最後一個 pointermove 沒有成功送出。
   flushTokenDragSync(tokenId, true);
@@ -909,6 +984,7 @@ function applyTransform() {
   canvasHolder.style.transform = transform;
   // Counter-rotate around each token's center while its position follows the map.
   canvasHolder.style.setProperty("--token-rotation", `${-viewRotation}deg`);
+  canvasHolder.classList.toggle("view-sideways", viewRotation % 180 !== 0);
   scheduleViewStatePersist();
   window.dispatchEvent(new Event("mapfog:view-change"));
 }
@@ -1531,6 +1607,10 @@ tokenSize?.addEventListener("change", () => {
   flushTokenControlSync(tokenId, ["size"]);
 });
 
+for (const button of tokenFootprintButtons) {
+  button.addEventListener("click", () => setSelectedTokenFootprint(button.dataset.tokenFootprint));
+}
+
 tokenSquareBtn?.addEventListener("click", () => {
   setTokenState({ shape: "square" });
 });
@@ -1547,6 +1627,7 @@ tokenClearBtn?.addEventListener("click", () => {
 window.addEventListener("pointermove", moveTokenDrag, { capture: true, passive: false });
 window.addEventListener("pointerup", endTokenDrag, { capture: true, passive: false });
 window.addEventListener("pointercancel", endTokenDrag, { capture: true, passive: false });
+window.addEventListener("keydown", moveSelectedTokenByKey);
 
 for (const surface of [toolbarToggleBtn, floatingToolbar, tokenPanel]) {
   surface?.addEventListener("pointerdown", stopUiPointerEvent);

@@ -85,6 +85,16 @@
     .map-token.hex {
       clip-path: polygon(25% 4%, 75% 4%, 100% 50%, 75% 96%, 25% 96%, 0 50%);
     }
+    /* 格子化時貼齊六角格：畫面轉 90° 時地圖上的格子變成尖頂，token 本身不轉，要換成尖頂的外框。 */
+    .map-token.hex.fit-hex-cell {
+      clip-path: polygon(25% 6.7%, 75% 6.7%, 100% 50%, 75% 93.3%, 25% 93.3%, 0 50%);
+    }
+    .view-sideways .map-token.hex.fit-hex-cell {
+      clip-path: polygon(6.7% 25%, 50% 0, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%);
+    }
+    .map-token.snap-selected {
+      border-color: #38bdf8;
+    }
     .map-token.dragging {
       cursor: grabbing;
     }
@@ -198,7 +208,8 @@
       padding: 0;
       border-radius: 8px;
     }
-    .token-panel label {
+    .token-panel label,
+    .token-snap-label {
       color: var(--muted);
       font-size: 13px;
     }
@@ -248,9 +259,16 @@
       cursor: pointer;
       font-size: 13px;
     }
+    .segmented button:disabled {
+      cursor: not-allowed;
+      opacity: 0.48;
+    }
     .segmented button.active {
       border-color: rgba(56, 189, 248, 0.55);
       background: rgba(56, 189, 248, 0.13);
+    }
+    .segmented-three {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
     .token-slider {
       display: grid;
@@ -346,6 +364,16 @@
         <input id="tokenSize" type="range" min="16" max="800" step="1" value="96">
       </div>
 
+      <div class="token-control-line">
+        <span class="token-snap-label">格子化（由 GM 設定）</span>
+        <span id="tokenSnapStatus" class="token-value">關閉</span>
+      </div>
+      <div class="segmented segmented-three" role="group" aria-label="Token 格子尺寸">
+        <button type="button" data-token-footprint="small" title="半格" disabled>小</button>
+        <button type="button" data-token-footprint="medium" title="1 格" disabled>中</button>
+        <button type="button" data-token-footprint="large" title="2×2 格" disabled>大</button>
+      </div>
+
       <div class="segmented" aria-label="Token 形狀">
         <button id="tokenSquareBtn" type="button">方形</button>
         <button id="tokenHexBtn" type="button">六角形</button>
@@ -407,9 +435,10 @@
   <script src="dice.js?v=20261021-icons"></script>
   <script src="map-adjust.js?v=20261021-toolbar-active"></script>
   <script src="image-processing.js?v=20261021-compression"></script>
-  <script src="player.js?v=20261109-house-rule"></script>
-  <script src="initiative-sync.js?v=20261021-icons"></script>
   <script src="measure-core.js?v=20261109-house-rule"></script>
+  <script src="token-grid-core.js?v=20261109-token-snap"></script>
+  <script src="player.js?v=20261109-token-snap"></script>
+  <script src="initiative-sync.js?v=20261109-token-snap"></script>
   <script src="measure.js?v=20261109-house-rule"></script>
   <script src="panel-layout.js?v=20261109-measure"></script>
   <script>

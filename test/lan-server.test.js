@@ -488,6 +488,69 @@ test("格線的「一格 10 呎」會同步給玩家，舊資料預設關閉", a
   assert.equal(late.welcome.state.grid.tenFoot, false);
 });
 
+test("格線的 token 格子化開關會同步給玩家，舊資料預設關閉", async (t) => {
+  const env = await setupRoom(t);
+  const player = await env.connect({ role: "player" });
+  await env.gm.op("sendGridSettings", { grid: { enabled: true, type: "hex", size: 80, tokenSnap: true } });
+  const update = await player.waitFor((message) => message.t === "grid");
+  assert.equal(update.grid.tokenSnap, true);
+  const midGame = await env.connect({ role: "player" });
+  assert.equal(midGame.welcome.state.grid.tokenSnap, true);
+  await env.gm.op("sendGridSettings", { grid: { enabled: true, type: "square", size: 80 } });
+  const late = await env.connect({ role: "player" });
+  assert.equal(late.welcome.state.grid.tokenSnap, false);
+});
+
+test("token 格子尺寸：同步、清理不合法的值，舊 token 預設為中", async (t) => {
+  const { gm, connect } = await setupRoom(t);
+  const player = await connect({ role: "player" });
+
+  await gmAddToken(gm, token("tokOld"));
+  const added = await player.waitFor((m) => m.t === "tokenAdd" && m.token.id === "tokOld");
+  assert.equal(added.token.footprint, "medium", "沒帶尺寸的 token 算中");
+
+  assert.equal((await gm.op("updateToken", { tokenId: "tokOld", changes: { footprint: "large", x: 200, y: 240 } })).ok, true);
+  const patch = await player.waitFor((m) => m.t === "tokenPatch" && m.changes.footprint === "large");
+  assert.deepEqual(patch.changes, { x: 200, y: 240, footprint: "large" });
+
+  await gm.op("updateToken", { tokenId: "tokOld", changes: { footprint: "<script>" } });
+  await player.waitFor((m) => m.t === "tokenPatch" && m.changes.footprint === "medium");
+
+  await gm.op("addToken", { token: token("tokSmall", { footprint: "small" }) });
+  const late = await connect({ role: "player" });
+  assert.equal(late.welcome.state.tokens.find((entry) => entry.token.id === "tokSmall").token.footprint, "small");
+});
+
+test("token 格子尺寸遵守鎖定：玩家只能改未鎖定的 token，被拒絕時收到正確版本", async (t) => {
+  const { gm, connect } = await setupRoom(t);
+  const player = await connect({ role: "player" });
+  await gmAddToken(gm, token("tokFree"));
+  await gm.op("addToken", { token: token("tokLocked", { locked: true, footprint: "small" }) });
+
+  const allowed = await player.op("updateToken", { tokenId: "tokFree", changes: { footprint: "large", x: 300, y: 300 } });
+  assert.equal(allowed.ok, true);
+  const seen = await gm.waitFor((m) => m.t === "tokenPatch" && m.tokenId === "tokFree");
+  assert.equal(seen.changes.footprint, "large");
+  assert.equal(seen.sourceRole, "player");
+
+  const denied = await player.op("updateToken", { tokenId: "tokLocked", changes: { footprint: "large" } });
+  assert.equal(denied.code, "forbidden");
+  const correction = await player.waitFor((m) => m.t === "token" && m.tokenId === "tokLocked");
+  assert.equal(correction.token.footprint, "small");
+});
+
+test("GM 鎖定後 10 秒寬限只收位置，不收格子尺寸", async (t) => {
+  const { gm, connect } = await setupRoom(t);
+  const player = await connect({ role: "player" });
+  await gmAddToken(gm, token("tokGrace"));
+  await gm.op("updateToken", { tokenId: "tokGrace", changes: { locked: true } });
+  await player.waitFor((m) => m.t === "tokenPatch" && m.changes.locked === true);
+
+  assert.equal((await player.op("updateToken", { tokenId: "tokGrace", changes: { x: 410, y: 410 } })).ok, true);
+  const denied = await player.op("updateToken", { tokenId: "tokGrace", changes: { footprint: "large" } });
+  assert.equal(denied.code, "forbidden");
+});
+
 test("直線與曲線：同步給其他畫面，中途加入看得到，斷線自動移除，不寫進硬碟", async (t) => {
   const env = await setupRoom(t);
   const player = await env.connect({ role: "player" });
