@@ -13,6 +13,7 @@ const SAVE_DELAY_MS = 400;
 // 迷霧壓縮由 GM 端在 200 筆時處理；這裡只是防止異常資料無限累積。
 const MAX_FOG_BATCHES = 4000;
 const MAX_TOKENS = 500;
+const MAX_MEASURE_TEMPLATES = 100;
 const MAX_TOMBSTONES = 2000;
 const MAX_RECENT_OPS = 2000;
 // 鎖定後這段時間內，仍接受玩家送來的位置（與 app.js 的 TOKEN_LOCK_GRACE_MS 相同）。
@@ -39,7 +40,8 @@ function createEmptyState(roomId) {
     tokens: {},
     tokenMetas: {},
     tombstones: {},
-    imageIndex: {}
+    imageIndex: {},
+    measureTemplates: {}
   };
 }
 
@@ -90,6 +92,8 @@ class Room {
     this.clients = new Set();
     this.sessions = new Map();
     this.recentOps = new Map();
+    // 每個畫面正在顯示的直線或曲線：只是暫時的，不寫進硬碟，斷線就移除。
+    this.measureLines = new Map();
     this.saveTimer = null;
     this.dirty = false;
     this.lastActiveAt = Date.now();
@@ -206,6 +210,8 @@ class Room {
       initiative: state.initiative,
       metas: state.metas,
       tokens: Object.values(state.tokens).map((token) => ({ token, ...this.tokenMetaView(token.id) })),
+      measureTemplates: Object.values(state.measureTemplates),
+      measureLines: [...this.measureLines].map(([owner, line]) => ({ owner, ...line })),
       imageIndex: client.role === "gm" ? state.imageIndex : {},
       presence: this.presence()
     };
@@ -275,6 +281,19 @@ class Room {
   tokenCorrection(tokenId) {
     const token = this.state.tokens[tokenId] || null;
     return { t: "token", tokenId, token, ...this.tokenMetaView(tokenId), sourceRole: "server" };
+  }
+
+  // 更新某個畫面的線，回傳要轉送給其他人的訊息；沒有變化時回傳 null。
+  setMeasureLine(client, rawLine) {
+    this.touch();
+    const line = v.sanitizeMeasureLine(rawLine);
+    if (line) this.measureLines.set(client.clientId, line);
+    else if (!this.measureLines.delete(client.clientId)) return null;
+    return { t: "measureLine", owner: client.clientId, line };
+  }
+
+  measureCorrection(templateId) {
+    return { t: "measure", templateId, template: this.state.measureTemplates[templateId] || null, correction: true };
   }
 
   imageInUse() {
@@ -544,6 +563,40 @@ const OP_HANDLERS = {
     this.trimTombstones();
     this.scheduleSave();
     return result(true, { rev, toOthers: [{ t: "tokenRemove", tokenId, rev, by: client.clientId, sourceRole: client.role }] });
+  },
+
+  // 地圖上的範圍沒有鎖定也沒有私有資料：所有人都能操作，以最後送達的為準。
+  addMeasureTemplate(client, op) {
+    const template = v.sanitizeMeasureTemplate(op.template);
+    if (!template) return reject("bad-request", "範圍資料格式錯誤");
+    const templates = this.state.measureTemplates;
+    if (!templates[template.id] && Object.keys(templates).length >= MAX_MEASURE_TEMPLATES) {
+      return reject("too-large", `每個房間最多 ${MAX_MEASURE_TEMPLATES} 個範圍`, { toSender: [this.measureCorrection(template.id)] });
+    }
+    templates[template.id] = template;
+    this.scheduleSave();
+    return result(true, { toOthers: [{ t: "measureAdd", template }] });
+  },
+
+  updateMeasureTemplate(client, op) {
+    const templates = this.state.measureTemplates;
+    const templateId = op.templateId;
+    if (!v.isValidId(templateId)) return reject("bad-request", "範圍 id 格式錯誤");
+    if (!templates[templateId]) return reject("gone", "這個範圍已不存在", { toSender: [this.measureCorrection(templateId)] });
+    const changes = v.sanitizeMeasureChanges(op.changes);
+    if (!Object.keys(changes).length) return result(true);
+    templates[templateId] = { ...templates[templateId], ...changes };
+    this.scheduleSave();
+    return result(true, { toOthers: [{ t: "measurePatch", templateId, changes }] });
+  },
+
+  removeMeasureTemplate(client, op) {
+    const templateId = op.templateId;
+    if (!v.isValidId(templateId)) return reject("bad-request", "範圍 id 格式錯誤");
+    if (!this.state.measureTemplates[templateId]) return result(true);
+    delete this.state.measureTemplates[templateId];
+    this.scheduleSave();
+    return result(true, { toOthers: [{ t: "measureRemove", templateId }] });
   },
 
   diceRoll(client, op) {

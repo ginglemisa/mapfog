@@ -234,6 +234,14 @@
       return roomPath(`token/tokensById/${tokenKey(tokenId)}`);
     }
 
+    function measureLineRef() {
+      return roomPath(`measureLines/${tokenKey(clientId)}`);
+    }
+
+    function measureRef(templateId) {
+      return roomPath(`measureTemplates/${tokenKey(templateId)}`);
+    }
+
     // 每次寫入 token 都記下是誰改的，GM 端靠 sourceRole 判斷要不要接受。
     function tokenMeta(sourceRole) {
       return {
@@ -316,6 +324,8 @@
           gridSettings: null,
           initiative: null,
           token: null,
+          measureTemplates: null,
+          measureLines: null,
           events: null,
           images: null,
           imageIndex: null
@@ -404,6 +414,53 @@
       onTokenEvents(handlers) {
         return listenTokens(handlers);
       },
+      // 地圖上的範圍：新增寫完整節點，移動與旋轉只 update 有變的欄位。
+      addMeasureTemplate(template) {
+        if (!template?.id) return Promise.resolve();
+        return measureRef(template.id).set(template);
+      },
+      updateMeasureTemplate(templateId, changes) {
+        if (!templateId || !Object.keys(changes || {}).length) return Promise.resolve();
+        return measureRef(templateId).update(changes);
+      },
+      removeMeasureTemplate(templateId) {
+        if (!templateId) return Promise.resolve();
+        return measureRef(templateId).remove();
+      },
+      // 每個畫面一條線，放在 measureLines/{clientId}，斷線時由 Firebase 自動移除。
+      sendMeasureLine(line) {
+        return line ? measureLineRef().set({ ...line, owner: clientId }) : measureLineRef().remove();
+      },
+      onMeasureLines(callback) {
+        const reference = roomPath("measureLines");
+        reference.on("value", (snapshot) => {
+          const lines = [];
+          snapshot.forEach((child) => {
+            const node = child.val();
+            if (node?.owner && node.owner !== clientId && Array.isArray(node.cells)) lines.push(node);
+          });
+          callback(lines);
+        }, logError);
+        return function unsubscribe() {
+          reference.off("value");
+        };
+      },
+      onMeasureTemplates(callback) {
+        const reference = roomPath("measureTemplates");
+        reference.on("value", (snapshot) => {
+          const templates = [];
+          snapshot.forEach((child) => {
+            const node = child.val();
+            if (node?.id && node.shape) templates.push(node);
+            // 沒有形狀的節點是「別人剛刪掉、這邊又送了位置更新」留下的殘骸。
+            else child.ref.remove().catch(logError);
+          });
+          callback(templates);
+        }, logError);
+        return function unsubscribe() {
+          reference.off("value");
+        };
+      },
       sendInitiativeState(initiativeState) {
         return roomPath("initiative").set(withMeta(initiativeState || { entries: [] }));
       },
@@ -431,6 +488,8 @@
       connectionState.connected = snapshot.val() === true;
       if (connectionState.connected) {
         connectionState.everConnected = true;
+        // 每次連上都要重新登記，斷線後這個畫面的線才會被移除。
+        measureLineRef().onDisconnect().remove().catch(logError);
         // 先登記「斷線時移除」，再寫入在線資料，避免斷線後留下殘留紀錄。
         presenceRef.onDisconnect().remove()
           .then(() => presenceRef.set({ role, connectedAt: firebase.database.ServerValue.TIMESTAMP }))

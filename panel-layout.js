@@ -3,7 +3,7 @@
 // - GM 電腦版：面板可以同時開，依打開順序排列、不互相重疊。左上工具列的面板（地圖設定、格線、地圖調整）由左往右，
 //   Token 與骰子由右往左；放不下就排到已開面板下方。先攻面板位置由它自己決定（可拖曳），其他面板避開它。
 // - GM 右下角模式按鈕的高度提供給平板版抽屜，讓抽屜停在按鈕上方。
-// - 玩家頁：骰子面板和 Token 面板在同一個位置，同時間只開一個。
+// - 玩家頁：骰子、Token、測量工具面板在同一個位置，同時間只開一個。
 (() => {
   const viewport = document.getElementById("viewport");
   if (!viewport) return;
@@ -81,11 +81,14 @@
     const sideToolbar = document.getElementById("sideToolbar");
     const dock = document.getElementById("modeDock");
     const initiativePanel = document.getElementById("initiativePanel");
+    // 測量工具和先攻一樣自己決定位置（可拖曳），其他面板避開它。
+    const measurePanel = document.getElementById("measurePanel");
     let openOrder = panels.filter((panel) => !panel.hidden);
     let timer = 0;
 
     const isTablet = () => document.body.classList.contains("tablet-layout");
-    const isVisible = (element) => Boolean(element && !element.hidden && element.offsetParent !== null);
+    // 不用 offsetParent 判斷：position: fixed 的元素 offsetParent 一律是 null。
+    const isVisible = (element) => Boolean(element && !element.hidden && element.getClientRects().length > 0);
     // 同一輪的多個變化只排一次版。不用 requestAnimationFrame：分頁在背景時它不會執行。
     const schedule = () => {
       if (timer) return;
@@ -115,7 +118,7 @@
       const firstTop = Math.max(mainRect?.bottom || 0, sideRect?.bottom || 0, 56) + GAP;
       const screenBottom = window.innerHeight - EDGE;
       // 不能蓋到的區域：先攻面板、右下角模式按鈕，以及已經排好的面板。
-      const placed = [initiativePanel, dock]
+      const placed = [initiativePanel, measurePanel, dock]
         .filter(isVisible)
         .map((element) => element.getBoundingClientRect())
         .map(({ left, top, right, bottom }) => ({ left, top, right, bottom }));
@@ -186,12 +189,14 @@
       schedule();
     });
     panels.forEach((panel) => observer.observe(panel, { attributes: true, attributeFilter: ["hidden"] }));
-    if (initiativePanel) observer.observe(initiativePanel, { attributes: true, attributeFilter: ["hidden"] });
+    for (const element of [initiativePanel, measurePanel]) {
+      if (element) observer.observe(element, { attributes: true, attributeFilter: ["hidden"] });
+    }
     new MutationObserver(schedule).observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
     if ("ResizeObserver" in window) {
       const resizeObserver = new ResizeObserver(schedule);
-      [...panels, mainToolbar, sideToolbar, dock, initiativePanel].filter(Boolean).forEach((element) => resizeObserver.observe(element));
+      [...panels, mainToolbar, sideToolbar, dock, initiativePanel, measurePanel].filter(Boolean).forEach((element) => resizeObserver.observe(element));
     }
     window.addEventListener("resize", schedule);
     // 先攻面板拖曳結束後，右上的面板可能要讓位。
@@ -205,17 +210,35 @@
     const tokenCloseButton = document.getElementById("tokenPanelCloseBtn");
     const diceButton = document.getElementById("diceToggleBtn");
     const diceToolbar = document.getElementById("diceToolbar");
+    const measureButton = document.getElementById("measureToggleBtn");
+    const measurePanel = document.getElementById("measurePanel");
     if (!tokenButton || !tokenPanel || !diceButton || !diceToolbar) return;
 
-    // 捕獲階段：按下的按鈕即將打開自己的面板時，先關掉另一個。
+    const closeDice = () => {
+      if (diceToolbar.hidden) return;
+      diceToolbar.hidden = true;
+      diceButton.classList.remove("active");
+      diceButton.setAttribute("aria-expanded", "false");
+    };
+    const closeToken = () => {
+      if (!tokenPanel.hidden) tokenCloseButton?.click();
+    };
+    const closeMeasure = () => {
+      if (measurePanel) measurePanel.hidden = true;
+    };
+
+    // 捕獲階段：按下的按鈕即將打開自己的面板時，先關掉其他的。
     document.addEventListener("click", (event) => {
       const button = event.target instanceof Element ? event.target.closest("button") : null;
-      if (button === tokenButton && tokenPanel.hidden && !diceToolbar.hidden) {
-        diceToolbar.hidden = true;
-        diceButton.classList.remove("active");
-        diceButton.setAttribute("aria-expanded", "false");
-      } else if (button === diceButton && diceToolbar.hidden && !tokenPanel.hidden) {
-        tokenCloseButton?.click();
+      if (button === tokenButton && tokenPanel.hidden) {
+        closeDice();
+        closeMeasure();
+      } else if (button === diceButton && diceToolbar.hidden) {
+        closeToken();
+        closeMeasure();
+      } else if (button && button === measureButton && measurePanel?.hidden) {
+        closeDice();
+        closeToken();
       }
     }, true);
   }

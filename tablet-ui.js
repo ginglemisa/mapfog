@@ -22,11 +22,12 @@
   // 先攻按鈕在右上，但面板在左上，所以算左上。
   const GROUPS = {
     left: ['controls', 'grid', 'mapAdjust', 'initiative'],
-    right: ['token', 'dice']
+    right: ['token', 'measure', 'dice']
   };
   const STANDALONE = {
     initiative: ['initiativePanel', 'initiativePanelBtn'],
-    dice: ['diceToolbar', 'diceToggleBtn']
+    dice: ['diceToolbar', 'diceToggleBtn'],
+    measure: ['measurePanel', 'measureToggleBtn']
   };
 
   function closePanels(names) {
@@ -98,7 +99,8 @@
       tokenSettingsBtn: 'token',
       mapAdjustBtn: 'mapAdjust',
       initiativePanelBtn: 'initiative',
-      diceToggleBtn: 'dice'
+      diceToggleBtn: 'dice',
+      measureToggleBtn: 'measure'
     };
     if (buttons[button.id]) closeOthersInGroup(buttons[button.id]);
   }, true);

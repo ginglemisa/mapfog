@@ -276,6 +276,8 @@ function createDefaultGridSettings() {
     opacity: 0.45,
     size: 80,
     lineWidth: 1,
+    tenFoot: false,
+    diagonalHouseRule: false,
     offsetX: 0,
     offsetY: 0
   };
@@ -291,7 +293,9 @@ function normalizeGridSettings(settings = {}) {
     size: clamp(Number(settings.size ?? defaults.size), 24, 240),
     lineWidth: clamp(Number(settings.lineWidth ?? defaults.lineWidth), 1, 20),
     offsetX: clamp(Number(settings.offsetX ?? defaults.offsetX), -240, 240),
-    offsetY: clamp(Number(settings.offsetY ?? defaults.offsetY), -240, 240)
+    offsetY: clamp(Number(settings.offsetY ?? defaults.offsetY), -240, 240),
+    tenFoot: Boolean(settings.tenFoot),
+    diagonalHouseRule: Boolean(settings.diagonalHouseRule)
   };
 }
 
@@ -399,6 +403,7 @@ function setGridSettings(nextSettings, options = {}) {
   gridSettings = normalizeGridSettings({ ...gridSettings, ...nextSettings });
   drawGrid();
   if (options.cache !== false) cacheGridSettings();
+  window.dispatchEvent(new Event("mapfog:view-change"));
 }
 
 function createTokenId() {
@@ -905,6 +910,7 @@ function applyTransform() {
   // Counter-rotate around each token's center while its position follows the map.
   canvasHolder.style.setProperty("--token-rotation", `${-viewRotation}deg`);
   scheduleViewStatePersist();
+  window.dispatchEvent(new Event("mapfog:view-change"));
 }
 
 function getViewDimensions() {
@@ -1625,6 +1631,18 @@ window.addEventListener("pagehide", persistBeforeLeaving);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") persistBeforeLeaving();
 });
+
+// 測量工具（measure.js）用這組介面讀地圖狀態；地圖視角或格線一變就會收到 mapfog:view-change。
+window.MapFogHost = {
+  getGrid: () => gridSettings,
+  getView: () => ({ scale, offsetX, offsetY, rotation: viewRotation }),
+  getMapSize: () => ({ width: mapCanvas.width, height: mapCanvas.height }),
+  hasMap: () => hasMap,
+  toMapPoint: eventToCanvasPoint,
+  isRemoteRoom: IS_REMOTE_ROOM,
+  storagePrefix: LOCAL_CACHE_PREFIX,
+  whenSyncReady: whenFirebaseReady
+};
 
 updateTokenControls();
 setTokenPanelOpen(false);

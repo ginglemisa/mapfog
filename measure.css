@@ -1,0 +1,413 @@
+/* 測量工具：覆蓋層、面板與輸入數字的小視窗（GM 與玩家頁共用）。 */
+.measure-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+#measureToggleBtn[hidden] {
+  display: none;
+}
+
+.viewport.measure-tool-active,
+.viewport.measure-tool-active * {
+  cursor: crosshair !important;
+}
+
+.viewport.measure-can-grab,
+.viewport.measure-can-grab * {
+  cursor: grab !important;
+}
+
+.viewport.measure-dragging,
+.viewport.measure-dragging * {
+  cursor: grabbing !important;
+}
+
+.measure-panel {
+  position: fixed;
+  top: 78px;
+  right: 14px;
+  z-index: 36;
+  width: min(308px, calc(100vw - 16px));
+  max-height: calc(100dvh - 92px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  overflow-y: auto;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 8px;
+  background: rgba(11, 18, 32, 0.94);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.38);
+  color: #f8fafc;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.measure-panel[hidden],
+.measure-modal-backdrop[hidden],
+.measure-empty[hidden],
+.measure-text-button[hidden] {
+  display: none;
+}
+
+.measure-panel svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.measure-panel-header,
+.measure-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.measure-panel-header {
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.measure-panel-title {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.measure-icon-button {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.6);
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+.measure-icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.measure-tools {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.measure-tools button {
+  min-height: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 5px 2px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.6);
+  color: #f8fafc;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.measure-tools button.active {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.22);
+  color: #38bdf8;
+}
+
+@media (hover: hover) {
+  .measure-tools button:hover,
+  .measure-icon-button:hover {
+    border-color: #38bdf8;
+  }
+}
+
+.measure-house-rule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.measure-house-rule input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.measure-house-rule:has(input:disabled) {
+  color: #94a3b8;
+  cursor: default;
+}
+
+.measure-house-note {
+  margin: -6px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.measure-house-note[hidden] {
+  display: none;
+}
+
+.measure-hint,
+.measure-empty {
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.measure-list-header {
+  min-height: 28px;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.measure-text-button {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #fca5a5;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.measure-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.measure-list:empty {
+  display: none;
+}
+
+.measure-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 3px 3px 8px;
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.5);
+  font-size: 14px;
+}
+
+.measure-swatch {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border-radius: 3px;
+}
+
+.measure-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+body.map-interacting .measure-panel {
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.measure-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(2, 6, 23, 0.55);
+}
+
+.measure-modal {
+  width: min(280px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 12px;
+  background: #0b1220;
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.5);
+  color: #f8fafc;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.measure-modal-title {
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.measure-stepper {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  gap: 6px;
+}
+
+.measure-stepper button,
+.measure-stepper input {
+  height: 48px;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 8px;
+  background: #182033;
+  color: #f8fafc;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.measure-stepper button {
+  cursor: pointer;
+}
+
+/* 16px 以上 iOS 才不會在聚焦時自動放大畫面。 */
+.measure-stepper input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 6px;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.measure-stepper input::-webkit-outer-spin-button,
+.measure-stepper input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.measure-modal-error {
+  margin: -4px 0 0;
+  min-height: 18px;
+  color: #fca5a5;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.measure-circle-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.measure-circle-mode[hidden] {
+  display: none;
+}
+
+.measure-circle-mode button {
+  display: grid;
+  gap: 2px;
+  padding: 8px 6px;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.7);
+  color: #f8fafc;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.measure-circle-mode button span {
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.measure-circle-mode button.active {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.22);
+}
+
+.measure-modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 8px;
+}
+
+.measure-modal-actions button {
+  min-height: 44px;
+  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 8px;
+  background: rgba(2, 6, 23, 0.7);
+  color: #f8fafc;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.measure-modal-actions .measure-modal-confirm {
+  border-color: #38bdf8;
+  background: #0284c7;
+}
+
+@media (max-width: 700px) {
+  .measure-panel {
+    top: 68px;
+    right: 8px;
+  }
+}
+
+/* 平板版：跟其他右上面板同一個位置，按鈕放大成手指好按的尺寸。 */
+.gm-page.tablet-layout .measure-panel {
+  top: calc(69px + env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  width: min(308px, calc(50vw - 18px));
+  max-height: calc(100dvh - 83px - env(safe-area-inset-top) - var(--mode-dock-space, 0px));
+  border-radius: 14px;
+  background: rgba(11, 18, 32, 0.97);
+}
+
+.gm-page.tablet-layout .measure-icon-button {
+  width: 44px;
+  height: 44px;
+}
+
+.gm-page.tablet-layout .measure-text-button {
+  min-height: 44px;
+}
+
+/* 窄手機：玩家工具列多了測量按鈕，稍微縮小才放得下，收合箭頭不會被擠到畫面外。 */
+@media (max-width: 420px) {
+  .player-page .floating-toolbar {
+    gap: 4px;
+    padding: 5px;
+  }
+
+  .player-page .floating-toolbar > .tool-button {
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+  }
+}

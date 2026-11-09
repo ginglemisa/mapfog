@@ -421,6 +421,12 @@ class LanServer {
       this.broadcastPresence(room);
       return;
     }
+    if (message.t === "measureLine") {
+      if (!client.synced) return;
+      const update = client.room.setMeasureLine(client, message.line);
+      if (update) this.broadcast(client.room, update, (other) => other !== client);
+      return;
+    }
     if (message.t === "op") this.handleOp(client, message);
   }
 
@@ -505,6 +511,11 @@ class LanServer {
     if (!room) return;
     room.clients.delete(client);
     room.touch();
+    // 同一個畫面重新連線時，舊連線可能比新連線晚關閉，新連線還在就不移除它的線。
+    const stillConnected = [...room.clients].some((other) => other.clientId === client.clientId);
+    if (!stillConnected && room.measureLines.delete(client.clientId)) {
+      this.broadcast(room, { t: "measureLine", owner: client.clientId, line: null });
+    }
     if (client.synced) this.broadcastPresence(room);
   }
 }

@@ -709,10 +709,11 @@
     }
 
   </style>
-  <link rel="stylesheet" href="toolbar-ui.css?v=20261021-icons">
+  <link rel="stylesheet" href="toolbar-ui.css?v=20261109-measure">
   <link rel="stylesheet" href="map-adjust.css?v=20261021-left-panels">
-  <link rel="stylesheet" href="tablet-ui.css?v=20261021-icons">
+  <link rel="stylesheet" href="tablet-ui.css?v=20261109-measure">
   <link rel="stylesheet" href="player-qr.css?v=20261021-lanroom">
+  <link rel="stylesheet" href="measure.css?v=20261109-house-rule">
 </head>
 <body class="gm-page">
   <div class="wrap">
@@ -868,6 +869,11 @@
                 <button id="gridSquareBtn" type="button">方格</button>
                 <button id="gridHexBtn" type="button">六角格</button>
               </div>
+
+              <label class="grid-toggle-row" for="gridTenFoot">
+                <span>一格 10 呎（法術範圍細分成四格）</span>
+                <input id="gridTenFoot" type="checkbox">
+              </label>
 
               <div class="segmented" aria-label="格線顏色">
                 <button id="gridWhiteBtn" type="button">白線</button>
@@ -1031,18 +1037,20 @@
   </dialog>
 
   <script src="sync-mode.js?v=20261021-lanroom"></script>
-  <script src="firebase-sync.js?v=20261021-lanroom"></script>
+  <script src="firebase-sync.js?v=20261109-shared-line"></script>
   <script src="local-store.js"></script>
-  <script src="lan-sync.js?v=20261021-lanroom"></script>
+  <script src="lan-sync.js?v=20261109-shared-line"></script>
   <script src="connection-status.js?v=20261021-lanroom"></script>
   <script src="image-store.js?v=20261021-lanroom"></script>
   <script src="dice.js?v=20261021-icons"></script>
   <script src="map-adjust.js?v=20261021-toolbar-active"></script>
   <script src="image-processing.js?v=20261021-compression"></script>
-  <script src="app.js?v=20261021-lanroom"></script>
+  <script src="app.js?v=20261109-house-rule"></script>
   <script src="initiative-sync.js?v=20261021-icons"></script>
-  <script src="tablet-ui.js?v=20261021-icons"></script>
-  <script src="panel-layout.js?v=20261021-left-panels"></script>
+  <script src="measure-core.js?v=20261109-house-rule"></script>
+  <script src="measure.js?v=20261109-house-rule"></script>
+  <script src="tablet-ui.js?v=20261109-measure"></script>
+  <script src="panel-layout.js?v=20261109-measure"></script>
   <script src="vendor/qrcode.min.js?v=1.0.0"></script>
   <script src="player-qr.js?v=20261021-lanroom"></script>
   <script>
