@@ -85,13 +85,6 @@
     .map-token.hex {
       clip-path: polygon(25% 4%, 75% 4%, 100% 50%, 75% 96%, 25% 96%, 0 50%);
     }
-    /* 格子化時貼齊六角格：畫面轉 90° 時地圖上的格子變成尖頂，token 本身不轉，要換成尖頂的外框。 */
-    .map-token.hex.fit-hex-cell {
-      clip-path: polygon(25% 6.7%, 75% 6.7%, 100% 50%, 75% 93.3%, 25% 93.3%, 0 50%);
-    }
-    .view-sideways .map-token.hex.fit-hex-cell {
-      clip-path: polygon(6.7% 25%, 50% 0, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%);
-    }
     .map-token.snap-selected {
       border-color: #38bdf8;
     }
@@ -436,8 +429,8 @@
   <script src="map-adjust.js?v=20261021-toolbar-active"></script>
   <script src="image-processing.js?v=20261021-compression"></script>
   <script src="measure-core.js?v=20261109-house-rule"></script>
-  <script src="token-grid-core.js?v=20261109-token-size"></script>
-  <script src="player.js?v=20261109-token-snap"></script>
+  <script src="token-grid-core.js?v=20261109-hex-cells"></script>
+  <script src="player.js?v=20261109-hex-cells"></script>
   <script src="initiative-sync.js?v=20261109-token-snap"></script>
   <script src="measure.js?v=20261109-merged"></script>
   <script src="panel-layout.js?v=20261109-measure"></script>

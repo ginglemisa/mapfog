@@ -38,31 +38,42 @@ test("尺寸名稱：不認得的值一律當成小", () => {
 });
 
 test("方格一格 5 呎：小 1 格、中 2 格、大 3 格", () => {
-  assert.equal(core.pixelSize(SQUARE, "small", "square"), 100);
-  assert.equal(core.pixelSize(SQUARE, "medium", "square"), 200);
-  assert.equal(core.pixelSize(SQUARE, "large", "square"), 300);
-  assert.equal(core.pixelSize(SQUARE, "medium", "hex"), 200, "六角形 token 在方格上一樣大");
+  assert.equal(core.pixelSize(SQUARE, "small"), 100);
+  assert.equal(core.pixelSize(SQUARE, "medium"), 200);
+  assert.equal(core.pixelSize(SQUARE, "large"), 300);
 });
 
 test("方格一格 10 呎：小 0.5 格、中 1 格、大 1.5 格", () => {
-  assert.equal(core.pixelSize(TEN_FOOT, "small", "square"), 50);
-  assert.equal(core.pixelSize(TEN_FOOT, "medium", "square"), 100);
-  assert.equal(core.pixelSize(TEN_FOOT, "large", "square"), 150);
+  assert.equal(core.pixelSize(TEN_FOOT, "small"), 50);
+  assert.equal(core.pixelSize(TEN_FOOT, "medium"), 100);
+  assert.equal(core.pixelSize(TEN_FOOT, "large"), 150);
 });
 
-test("六角格：六角形 token 是 1、2、3 倍邊長，方形 token 不超過上下邊", () => {
-  assert.equal(core.pixelSize(HEX, "small", "hex"), 100);
-  assert.equal(core.pixelSize(HEX, "medium", "hex"), 200);
-  assert.equal(core.pixelSize(HEX, "large", "hex"), 300);
-  near(core.pixelSize(HEX, "small", "square"), HEX_HEIGHT);
-  near(core.pixelSize(HEX, "medium", "square"), HEX_HEIGHT * 2);
-  near(core.pixelSize(HEX, "large", "square"), HEX_HEIGHT * 3);
+test("格子化的六角格上一律畫成六角形，token 存的形狀不變", () => {
+  for (const footprint of ["small", "medium", "large"]) {
+    for (const shape of ["square", "hex"]) {
+      const token = Object.freeze({ x: 2010, y: 1730, shape, footprint });
+      const placed = core.placement(HEX, token, BOUNDS);
+      assert.equal(placed.shape, "hex", shape + " " + footprint);
+      assert.equal(token.shape, shape);
+    }
+  }
+});
+
+test("其他情況維持 token 自己的形狀", () => {
+  assert.equal(core.placement(SQUARE, { x: 130, y: 140, shape: "square" }).shape, "square");
+  assert.equal(core.placement(SQUARE, { x: 130, y: 140, shape: "hex" }).shape, "hex");
+  assert.equal(core.displayShape({ ...HEX, tokenSnap: false }, { shape: "square" }), "square");
+  assert.equal(core.displayShape({ ...HEX, enabled: false }, { shape: "square" }), "square");
+  assert.equal(core.shapeFollowsGrid(HEX), true);
+  assert.equal(core.shapeFollowsGrid(SQUARE), false);
+  assert.equal(core.shapeFollowsGrid({ ...HEX, tokenSnap: false }), false);
 });
 
 test("六角格不支援一格 10 呎：就算設定留著也不換算", () => {
   const grid = { ...HEX, tenFoot: true };
   for (const footprint of ["small", "medium", "large"]) {
-    assert.equal(core.pixelSize(grid, footprint, "hex"), core.pixelSize(HEX, footprint, "hex"));
+    assert.equal(core.placement(grid, { x: 310, y: 400, shape: "hex", footprint }).size, core.placement(HEX, { x: 310, y: 400, shape: "hex", footprint }).size);
     assert.deepEqual(core.snapPoint(grid, { x: 310, y: 400, footprint }), core.snapPoint(HEX, { x: 310, y: 400, footprint }));
   }
 });
@@ -83,51 +94,152 @@ test("方格一格 10 呎：以 5 呎小格對齊", () => {
 
 test("placement 回傳畫的位置與大小，不改動 token 本身", () => {
   const token = Object.freeze({ x: 130, y: 140, size: 333, shape: "square", footprint: "medium" });
-  assert.deepEqual(core.placement(SQUARE, token, BOUNDS), { x: 100, y: 100, size: 200 });
+  assert.deepEqual(core.placement(SQUARE, token, BOUNDS), { x: 100, y: 100, size: 200, shape: "square" });
   assert.equal(token.size, 333);
 });
 
-// 三格、七格對應的格子，以中心格（或頂點旁的格子）列出。
-function cellsCovered(model, grid, footprint, placed) {
-  const center = model.cellAt(placed.x, placed.y);
-  if (footprint === "small") return [center];
-  if (footprint === "large") {
-    const all = [];
-    model.forEachCellInBox({ minX: placed.x - 200, minY: placed.y - 200, maxX: placed.x + 200, maxY: placed.y + 200 }, (cell) => {
-      if (model.distance(cell, center) <= 1) all.push(cell);
-    });
-    return all;
-  }
-  const seen = new Map();
-  for (let angle = 0; angle < 360; angle += 15) {
-    const radians = (angle * Math.PI) / 180;
-    const cell = model.cellAt(placed.x + Math.cos(radians) * 12, placed.y + Math.sin(radians) * 12);
-    seen.set(JSON.stringify(cell), cell);
-  }
-  return [...seen.values()];
+function cellKeys(cells) {
+  return cells.map((cell) => cell.col + "," + cell.row).sort();
 }
 
-test("六角格：小與大對齊格子中心，中對齊三格交會的頂點，token 剛好包住 1／3／7 格", () => {
+function polygonArea(points) {
+  return Math.abs(points.reduce((sum, a, index) => {
+    const b = points[(index + 1) % points.length];
+    return sum + a.x * b.y - b.x * a.y;
+  }, 0)) / 2;
+}
+
+function insidePolygon(points, point) {
+  let inside = false;
+  points.forEach((a, index) => {
+    const b = points[(index + 1) % points.length];
+    if ((a.y > point.y) !== (b.y > point.y) && point.x < a.x + ((point.y - a.y) / (b.y - a.y)) * (b.x - a.x)) inside = !inside;
+  });
+  return inside;
+}
+
+function hexToken(model, point, footprint) {
+  return { ...point, shape: "square", footprint };
+}
+
+test("六角格的小是一格，對齊格子中心", () => {
   const model = createGridModel(HEX);
-  const expectedCells = { small: 1, medium: 3, large: 7 };
-  for (const footprint of ["small", "medium", "large"]) {
-    const placed = core.placement(HEX, { x: 2010, y: 1730, shape: "hex", footprint }, BOUNDS);
-    if (footprint !== "medium") nearPoint(placed, model.center(model.cellAt(placed.x, placed.y)));
-    else nearPoint(model.snapToIntersection(placed.x, placed.y), placed);
-    const cells = cellsCovered(model, HEX, footprint, placed);
-    assert.equal(cells.length, expectedCells[footprint], footprint);
-    // 平頂六角形：|x|·√3 + |y| 不超過 √3 倍外接半徑，等於的點就是貼在邊上。
-    const radius = placed.size / 2;
-    let widest = 0;
-    for (const cell of cells) {
-      for (const corner of model.polygon(cell)) {
-        const dx = Math.abs(corner.x - placed.x);
-        const dy = Math.abs(corner.y - placed.y);
-        assert.ok(dy <= (Math.sqrt(3) / 2) * radius + 1e-6, footprint + " 上下超出");
-        widest = Math.max(widest, (dx * Math.sqrt(3) + dy) / (Math.sqrt(3) * radius));
-      }
+  const placed = core.placement(HEX, hexToken(model, model.center({ col: 10, row: 10 }), "small"), BOUNDS);
+  assert.deepEqual(cellKeys(placed.cells), ["10,10"]);
+  nearPoint(placed, model.center({ col: 10, row: 10 }));
+});
+
+test("六角格的中是繞著頂點的三格，兩種頂點方向都正確", () => {
+  const model = createGridModel(HEX);
+  const corners = model.polygon({ col: 10, row: 10 });
+  // 第 0 個頂點在格子右邊：一格在左、兩格在右。
+  const oneOnLeft = core.placement(HEX, hexToken(model, corners[0], "medium"), BOUNDS);
+  assert.deepEqual(cellKeys(oneOnLeft.cells), ["10,10", "11,10", "11,9"]);
+  nearPoint(oneOnLeft, corners[0]);
+  // 第 3 個頂點在格子左邊：一格在右、兩格在左。
+  const oneOnRight = core.placement(HEX, hexToken(model, corners[3], "medium"), BOUNDS);
+  assert.deepEqual(cellKeys(oneOnRight.cells), ["10,10", "9,10", "9,9"]);
+  nearPoint(oneOnRight, corners[3]);
+});
+
+test("六角格的大是中央一格加周圍六格，奇偶欄都正確", () => {
+  const model = createGridModel(HEX);
+  const even = core.placement(HEX, hexToken(model, model.center({ col: 10, row: 10 }), "large"), BOUNDS);
+  assert.deepEqual(cellKeys(even.cells), ["10,10", "10,11", "10,9", "11,10", "11,9", "9,10", "9,9"]);
+  const odd = core.placement(HEX, hexToken(model, model.center({ col: 11, row: 10 }), "large"), BOUNDS);
+  assert.deepEqual(cellKeys(odd.cells), ["10,10", "10,11", "11,10", "11,11", "11,9", "12,10", "12,11"]);
+});
+
+test("外框與佔的格子完全重合", () => {
+  const model = createGridModel(HEX);
+  const corners = model.polygon({ col: 10, row: 10 });
+  const cases = [
+    [model.center({ col: 10, row: 10 }), "small", 1, 6],
+    [corners[0], "medium", 3, 12],
+    [corners[3], "medium", 3, 12],
+    [model.center({ col: 10, row: 10 }), "large", 7, 18],
+    [model.center({ col: 11, row: 10 }), "large", 7, 18]
+  ];
+  for (const [point, footprint, cellCount, cornerCount] of cases) {
+    const placed = core.placement(HEX, hexToken(model, point, footprint), BOUNDS);
+    assert.equal(placed.cells.length, cellCount, footprint);
+    assert.equal(placed.outline.length, cornerCount, footprint);
+    // 面積等於格子總和，再加上每個格子中心都在裡面，代表外框就是聯集。
+    const cellArea = placed.cells.reduce((sum, cell) => sum + polygonArea(model.polygon(cell)), 0);
+    near(polygonArea(placed.outline), cellArea, footprint + " 面積");
+    const keys = new Set(cellKeys(placed.cells));
+    model.forEachCellInBox({ minX: placed.x - 400, minY: placed.y - 400, maxX: placed.x + 400, maxY: placed.y + 400 }, (cell) => {
+      assert.equal(insidePolygon(placed.outline, model.center(cell)), keys.has(cell.col + "," + cell.row), footprint + " " + cell.col + "," + cell.row);
+    });
+    const xs = placed.outline.map((p) => p.x);
+    const ys = placed.outline.map((p) => p.y);
+    near(placed.box.minX, Math.min(...xs));
+    near(placed.box.minY, Math.min(...ys));
+    near(placed.box.width, Math.max(...xs) - Math.min(...xs));
+    near(placed.box.height, Math.max(...ys) - Math.min(...ys));
+  }
+});
+
+// 把 elementFrame 的裁切外框換回地圖座標：元素跟螢幕同方向，以元素中心旋轉回去。
+function outlineFromFrame(frame, rotation) {
+  const centerX = frame.left + frame.width / 2;
+  const centerY = frame.top + frame.height / 2;
+  const toMap = { 0: (x, y) => [x, y], 90: (x, y) => [y, -x], 180: (x, y) => [-x, -y], 270: (x, y) => [-y, x] }[rotation];
+  return frame.clipPath.replace(/^polygon\(|\)$/g, "").split(", ").map((pair) => {
+    const [px, py] = pair.split(" ").map(parseFloat);
+    assert.ok(px >= -1e-3 && px <= frame.width + 1e-3 && py >= -1e-3 && py <= frame.height + 1e-3, "外框要在方框內");
+    const [dx, dy] = toMap(px - frame.width / 2, py - frame.height / 2);
+    return { x: centerX + dx, y: centerY + dy };
+  });
+}
+
+test("畫面旋轉時方框與外框跟著畫面方向，換回地圖座標仍貼齊格子", () => {
+  const model = createGridModel(HEX);
+  const corners = model.polygon({ col: 10, row: 10 });
+  for (const [point, footprint] of [[model.center({ col: 10, row: 10 }), "small"], [corners[0], "medium"], [corners[3], "medium"], [model.center({ col: 11, row: 10 }), "large"]]) {
+    const placed = core.placement(HEX, hexToken(model, point, footprint), BOUNDS);
+    for (const rotation of [0, 90, 180, 270]) {
+      const frame = core.elementFrame(placed, rotation);
+      const sideways = rotation % 180 !== 0;
+      near(frame.width, sideways ? placed.box.height : placed.box.width, "寬");
+      near(frame.height, sideways ? placed.box.width : placed.box.height, "高");
+      const outline = outlineFromFrame(frame, rotation);
+      assert.equal(outline.length, placed.outline.length);
+      outline.forEach((corner, index) => {
+        assert.ok(Math.hypot(corner.x - placed.outline[index].x, corner.y - placed.outline[index].y) < 0.01, footprint + "@" + rotation);
+      });
     }
-    near(widest, 1, footprint + " 應該剛好貼齊外框");
+  }
+});
+
+test("方格與自由大小的 token 沒有裁切外框", () => {
+  const frame = core.elementFrame(core.placement(SQUARE, { x: 130, y: 140, shape: "square", footprint: "medium" }, BOUNDS), 90);
+  assert.deepEqual(frame, { left: 0, top: 0, width: 200, height: 200, clipPath: "" });
+  assert.deepEqual(core.elementFrame({ x: 100, y: 100, size: 96 }, 0), { left: 52, top: 52, width: 96, height: 96, clipPath: "" });
+});
+
+test("拖曳途中整個形狀跟著移動", () => {
+  const model = createGridModel(HEX);
+  const placed = core.placement(HEX, hexToken(model, model.polygon({ col: 10, row: 10 })[0], "medium"), BOUNDS);
+  const moved = core.placedAt(placed, placed.x + 33, placed.y - 21);
+  assert.equal(moved.x, placed.x + 33);
+  near(moved.box.minX, placed.box.minX + 33);
+  near(moved.box.minY, placed.box.minY - 21);
+  nearPoint(moved.outline[4], { x: placed.outline[4].x + 33, y: placed.outline[4].y - 21 });
+  assert.deepEqual(core.placedAt({ x: 1, y: 2, size: 96 }, 5, 6), { x: 5, y: 6, size: 96 });
+});
+
+test("中的三格形狀移動後對應新的頂點", () => {
+  const model = createGridModel(HEX);
+  const start = model.polygon({ col: 10, row: 10 })[0];
+  let token = { ...start, shape: "square", footprint: "medium" };
+  for (const key of ["ArrowRight", "ArrowUp", "ArrowLeft", "ArrowDown", "ArrowRight"]) {
+    token = { ...token, ...core.step(HEX, token, key, 0, BOUNDS) };
+    const placed = core.placement(HEX, token, BOUNDS);
+    assert.equal(placed.cells.length, 3, key);
+    for (const cell of placed.cells) {
+      assert.ok(model.polygon(cell).some((corner) => Math.hypot(corner.x - placed.x, corner.y - placed.y) < 1e-6), key + " 三格都要碰到頂點");
+    }
   }
 });
 
