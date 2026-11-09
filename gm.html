@@ -636,17 +636,17 @@
       max-width: calc(100vw - 24px - var(--side-toolbar-space, 0px));
     }
     /* 右下角模式按鈕：疊在連線狀態上方，三種拖曳動作一定剛好亮一顆。
-       只放圖示，排成 [擦霧][移動] / [筆刷][矩形]。 */
+       只放圖示，排成一行 [擦霧][筆刷][矩形][移動][復原][重複]；畫面窄到放不下才換行。 */
     .mode-dock {
       position: fixed;
       right: max(12px, env(safe-area-inset-right));
       bottom: calc(max(12px, env(safe-area-inset-bottom)) + var(--connection-status-space, 0px));
       z-index: 37;
-      display: grid;
-      grid-template-columns: repeat(2, 42px);
-      grid-template-areas:
-        "fog pan"
-        "brush rect";
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: calc(100vw - 24px);
+      box-sizing: border-box;
       gap: 6px;
       padding: 6px;
       border: 1px solid var(--line);
@@ -659,16 +659,13 @@
       user-select: none;
       -webkit-user-select: none;
     }
-    /* 三選一按鈕的外框不佔位置，按鈕直接排進上面的格子。 */
+    /* 三選一按鈕的外框不佔位置，按鈕直接排進同一行。 */
     .mode-tools {
       display: contents;
     }
-    #toggleFogBtn { grid-area: fog; }
-    #panModeBtn { grid-area: pan; }
-    #brushModeBtn { grid-area: brush; }
-    #rectFogBtn { grid-area: rect; }
     .mode-action-button,
-    .mode-tool-button {
+    .mode-tool-button,
+    .mode-history-button {
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -841,6 +838,12 @@
               <svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M9 6l3-3 3 3"/><path d="M9 18l3 3 3-3"/><path d="M6 9l-3 3 3 3"/><path d="M18 9l3 3-3 3"/></svg>
             </button>
           </div>
+          <button id="undoFogBtn" class="mode-history-button" type="button" title="復原" aria-label="復原" disabled>
+            <svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>
+          </button>
+          <button id="redoFogBtn" class="mode-history-button" type="button" title="重複" aria-label="重複" disabled>
+            <svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h3"/></svg>
+          </button>
         </div>
 
         <div id="gridPanel" class="grid-panel" role="region" aria-label="格線設定" hidden>
@@ -1068,7 +1071,7 @@
   <script src="image-processing.js?v=20261021-compression"></script>
   <script src="measure-core.js?v=20261109-house-rule"></script>
   <script src="token-grid-core.js?v=20261109-hex-cells"></script>
-  <script src="app.js?v=20261109-hex-cells"></script>
+  <script src="app.js?v=20261109-fog-undo"></script>
   <script src="initiative-sync.js?v=20261109-token-snap"></script>
   <script src="measure.js?v=20261109-merged"></script>
   <script src="tablet-ui.js?v=20261109-measure"></script>

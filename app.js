@@ -79,6 +79,20 @@ const rectFogPreview = document.getElementById("rectFogPreview");
 const mapCtx = mapCanvas.getContext("2d");
 const gridCtx = gridCanvas.getContext("2d");
 const fogCtx = fogCanvas.getContext("2d");
+const undoFogBtn = document.getElementById("undoFogBtn");
+const redoFogBtn = document.getElementById("redoFogBtn");
+
+// 復原紀錄只存每一步變動範圍的像素，步數與總容量都有上限，超過就丟掉最舊的。
+const FOG_HISTORY_MAX_STEPS = 50;
+const FOG_HISTORY_MAX_BYTES = 256 * 1024 * 1024;
+// 連按復原時，等停下來才把結果同步給玩家，只送一張迷霧圖。
+const FOG_RESTORE_SYNC_DELAY_MS = 250;
+const fogEditSnapshot = document.createElement("canvas");
+const fogEditSnapshotCtx = fogEditSnapshot.getContext("2d", { willReadFrequently: true });
+let fogUndoStack = [];
+let fogRedoStack = [];
+let fogEdit = null;
+let fogRestoreSyncTimer = null;
 
 let currentImage = null;
 let isDrawing = false;
@@ -348,6 +362,7 @@ function roundCanvasValue(value) {
 }
 
 function flushPendingDraws() {
+  flushFogRestoreSync();
   if (!pendingDrawStrokes.length) return;
 
   const strokes = pendingDrawStrokes;
@@ -1707,6 +1722,7 @@ async function applyRemoteFogSync(remoteFog) {
   }
 
   stopFogBatches();
+  clearFogHistory();
   paintFogBase(remoteFog.base, checkpointImage);
   fogSync = {
     epoch: remoteFog.epoch,
@@ -1733,6 +1749,7 @@ function listenFogBatches() {
   stopFogBatchListener = firebaseSync.onFogBatches(epoch, fogSync.seq, (seq, strokes) => {
     if (fogSync.epoch !== epoch || seq <= fogSync.seq) return;
     fogSync.seq = seq;
+    clearFogHistory();
     drawBatch(strokes);
   });
 }
@@ -1780,9 +1797,109 @@ function compactFogIfNeeded() {
   publishFogCheckpoint();
 }
 
+function updateFogHistoryButtons() {
+  undoFogBtn.disabled = !fogUndoStack.length;
+  redoFogBtn.disabled = !fogRedoStack.length;
+}
+
+// 迷霧被換掉（換地圖或收到別的 GM 的修改）後，舊紀錄的像素已經對不上，要整個清掉。
+function clearFogHistory() {
+  fogUndoStack = [];
+  fogRedoStack = [];
+  fogEdit = null;
+  window.clearTimeout(fogRestoreSyncTimer);
+  fogRestoreSyncTimer = null;
+  updateFogHistoryButtons();
+}
+
+// 一步操作開始前先留一份完整迷霧，結束時才知道範圍，只裁下變動的部分。
+function beginFogEdit() {
+  if (fogEdit) return;
+  flushFogRestoreSync();
+  if (fogEditSnapshot.width !== fogCanvas.width || fogEditSnapshot.height !== fogCanvas.height) {
+    fogEditSnapshot.width = fogCanvas.width;
+    fogEditSnapshot.height = fogCanvas.height;
+  } else {
+    fogEditSnapshotCtx.clearRect(0, 0, fogEditSnapshot.width, fogEditSnapshot.height);
+  }
+  fogEditSnapshotCtx.drawImage(fogCanvas, 0, 0);
+  fogEdit = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+}
+
+function markFogEditArea(left, top, right, bottom) {
+  if (!fogEdit) return;
+  fogEdit.left = Math.min(fogEdit.left, left);
+  fogEdit.top = Math.min(fogEdit.top, top);
+  fogEdit.right = Math.max(fogEdit.right, right);
+  fogEdit.bottom = Math.max(fogEdit.bottom, bottom);
+}
+
+function commitFogEdit() {
+  const edit = fogEdit;
+  fogEdit = null;
+  if (!edit) return;
+
+  const left = Math.max(0, Math.floor(edit.left));
+  const top = Math.max(0, Math.floor(edit.top));
+  const right = Math.min(fogCanvas.width, Math.ceil(edit.right));
+  const bottom = Math.min(fogCanvas.height, Math.ceil(edit.bottom));
+  if (right <= left || bottom <= top) return;
+
+  fogUndoStack.push({
+    x: left,
+    y: top,
+    pixels: fogEditSnapshotCtx.getImageData(left, top, right - left, bottom - top)
+  });
+  fogRedoStack = [];
+  let totalBytes = fogUndoStack.reduce((sum, entry) => sum + entry.pixels.data.length, 0);
+  while (fogUndoStack.length > 1 && (fogUndoStack.length > FOG_HISTORY_MAX_STEPS || totalBytes > FOG_HISTORY_MAX_BYTES)) {
+    totalBytes -= fogUndoStack.shift().pixels.data.length;
+  }
+  updateFogHistoryButtons();
+}
+
+// 復原與重複共用：把紀錄的像素和畫面上同一塊互換，換下來的就是反方向要用的紀錄。
+function stepFogHistory(fromStack, toStack) {
+  if (isDrawing || !currentImage || !fromStack.length) return;
+
+  const entry = fromStack.pop();
+  const { x, y, pixels } = entry;
+  entry.pixels = fogCtx.getImageData(x, y, pixels.width, pixels.height);
+  fogCtx.putImageData(pixels, x, y);
+  toStack.push(entry);
+  updateFogHistoryButtons();
+  markFogChanged();
+
+  window.clearTimeout(fogRestoreSyncTimer);
+  fogRestoreSyncTimer = window.setTimeout(flushFogRestoreSync, FOG_RESTORE_SYNC_DELAY_MS);
+}
+
+// 擦霧紀錄只能往上疊，退回去要換成新的迷霧底圖；要在下一筆操作前送出，順序才不會亂。
+function flushFogRestoreSync() {
+  if (fogRestoreSyncTimer === null) return;
+  window.clearTimeout(fogRestoreSyncTimer);
+  fogRestoreSyncTimer = null;
+  if (!currentImage) return;
+
+  if (syncChannel) {
+    broadcastMessage({
+      type: "fogUpdate",
+      width: fogCanvas.width,
+      height: fogCanvas.height,
+      fogDataUrl: fogCanvas.toDataURL("image/png")
+    });
+  }
+  if (isWaitingForFirebase()) offlineChanges.fog = true;
+  else if (IS_REMOTE_ROOM) publishFogCheckpoint();
+}
+
 function resetFog(options = {}) {
   if (!currentImage) return;
-  if (options?.sync !== false) flushPendingDraws();
+  if (options?.sync !== false) {
+    flushPendingDraws();
+    beginFogEdit();
+    markFogEditArea(0, 0, fogCanvas.width, fogCanvas.height);
+  }
 
   fogCtx.globalCompositeOperation = "source-over";
   fogCtx.globalAlpha = 1;
@@ -1791,6 +1908,7 @@ function resetFog(options = {}) {
   fogCtx.fillRect(0, 0, fogCanvas.width, fogCanvas.height);
 
   if (options?.sync !== false) {
+    commitFogEdit();
     broadcastMessage({ type: "resetFog" });
     startFogEpoch("covered");
     publishFogEpoch();
@@ -1800,13 +1918,18 @@ function resetFog(options = {}) {
 
 function revealAllFog(options = {}) {
   if (!currentImage) return;
-  if (options?.sync !== false) flushPendingDraws();
+  if (options?.sync !== false) {
+    flushPendingDraws();
+    beginFogEdit();
+    markFogEditArea(0, 0, fogCanvas.width, fogCanvas.height);
+  }
 
   fogCtx.globalCompositeOperation = "source-over";
   fogCtx.globalAlpha = 1;
   fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
 
   if (options?.sync !== false) {
+    commitFogEdit();
     broadcastMessage({ type: "revealAllFog" });
     startFogEpoch("revealed");
     publishFogEpoch();
@@ -1815,6 +1938,7 @@ function revealAllFog(options = {}) {
 }
 
 function setCanvasSize(width, height) {
+  clearFogHistory();
   mapCanvas.width = width;
   mapCanvas.height = height;
   gridCanvas.width = width;
@@ -1878,6 +2002,7 @@ async function applyRemoteSnapshot(snapshot, options = {}) {
   }
 
   if (!options.keepGridSettings) setGridSettings(snapshot.gridSettings ?? createDefaultGridSettings(), { sync: false });
+  clearFogHistory();
   fogCtx.clearRect(0, 0, width, height);
 
   if (snapshot.fogDataUrl) {
@@ -1928,6 +2053,7 @@ async function applyRemoteFogState(fogState) {
   const fogImage = await loadImage(fogState.fogDataUrl);
   if (applySeq !== snapshotApplySeq || !fogStateMatchesCurrentMap(fogState)) return;
 
+  clearFogHistory();
   fogCtx.clearRect(0, 0, fogCanvas.width, fogCanvas.height);
   fogCtx.drawImage(fogImage, 0, 0, fogCanvas.width, fogCanvas.height);
   markFogChanged();
@@ -2119,6 +2245,7 @@ function drawRectFog(rect, options = {}) {
   fogCtx.restore();
 
   if (options.sync !== false) {
+    markFogEditArea(left, top, right, bottom);
     enqueueDrawSync({
       type: "rect",
       x: left,
@@ -2170,6 +2297,7 @@ function drawAt(x, y, options = {}) {
   fogCtx.restore();
 
   if (options.sync !== false) {
+    markFogEditArea(x - radius, y - radius, x + radius, y + radius);
     enqueueDrawSync({
       x,
       y,
@@ -2248,6 +2376,7 @@ function pointerDown(event) {
 
   isDrawing = true;
   fogCanvas.setPointerCapture?.(event.pointerId);
+  beginFogEdit();
   const { x, y } = eventToCanvasPoint(event);
   drawAt(x, y);
 }
@@ -2280,7 +2409,10 @@ function pointerUp(event) {
   fogCanvas.releasePointerCapture?.(event.pointerId);
   if (currentImage && activeRectDrag) {
     const rect = normalizeFogRect(activeRectDrag.start, eventToCanvasPoint(event));
-    if (drawRectFog(rect, { mode: activeRectDrag.mode })) {
+    beginFogEdit();
+    const drewRect = drawRectFog(rect, { mode: activeRectDrag.mode });
+    commitFogEdit();
+    if (drewRect) {
       flushPendingDraws();
       markFogChanged();
     }
@@ -2288,6 +2420,7 @@ function pointerUp(event) {
   }
 
   if (currentImage && wasDrawing) {
+    commitFogEdit();
     flushPendingDraws();
     markFogChanged();
   }
@@ -2599,6 +2732,8 @@ toggleFogBtn.addEventListener("click", () => {
 brushModeBtn?.addEventListener("click", () => setActiveTool("brush"));
 rectFogBtn?.addEventListener("click", () => setActiveTool("rect"));
 panModeBtn?.addEventListener("click", () => setActiveTool("pan"));
+undoFogBtn.addEventListener("click", () => stepFogHistory(fogUndoStack, fogRedoStack));
+redoFogBtn.addEventListener("click", () => stepFogHistory(fogRedoStack, fogUndoStack));
 
 rotateBtn?.addEventListener("click", () => {
   flushPendingDraws();
