@@ -781,7 +781,7 @@
     const grid = host.getGrid();
     const isHex = grid.type === "hex";
     const canEdit = Boolean(host.setDiagonalHouseRule);
-    houseRule.checked = Boolean(grid.diagonalHouseRule);
+    houseRule.checked = !isHex && Boolean(grid.diagonalHouseRule);
     houseRule.disabled = isHex || !canEdit;
     houseNote.textContent = isHex ? "六角格沒有斜走，這個房規不適用。" : (canEdit ? "" : "由 GM 決定。");
     houseNote.hidden = !houseNote.textContent;

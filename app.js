@@ -294,7 +294,8 @@ function normalizeGridSettings(settings = {}) {
     offsetX: clamp(Number(settings.offsetX ?? defaults.offsetX), -240, 240),
     offsetY: clamp(Number(settings.offsetY ?? defaults.offsetY), -240, 240),
     tenFoot: Boolean(settings.tenFoot),
-    diagonalHouseRule: Boolean(settings.diagonalHouseRule),
+    // 六角格沒有斜走，切到六角格就關掉；切回方格由 GM 自己再勾。
+    diagonalHouseRule: settings.type !== "hex" && Boolean(settings.diagonalHouseRule),
     tokenSnap: Boolean(settings.tokenSnap)
   };
 }
